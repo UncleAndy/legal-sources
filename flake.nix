@@ -21,6 +21,8 @@
           ];
 
           shellHook = ''
+            source ${./nix/prompt.sh}
+
             # Создаем и активируем virtualenv, если его еще нет
             if [ ! -d ".venv" ]; then
               virtualenv .venv
