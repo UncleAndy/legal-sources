@@ -4,6 +4,7 @@
 
 # ── Secrets (NEVER commit these) ──────────────────────────────
 .env
+.direnv
 *.env
 .env.*
 !.env.template
