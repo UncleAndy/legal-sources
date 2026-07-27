@@ -12,7 +12,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, UTC
 from pathlib import Path
 from typing import Iterator, Optional
 
@@ -59,7 +59,7 @@ def get_session() -> requests.Session:
 
 
 def list_gazette_issues(session: requests.Session, gazette_type: int = 0,
-                        year: int = 2025, max_pages: int = 3) -> list[dict]:
+                        year: int = 2025) -> list[dict]:
     """
     List gazette issues from the registry.
 
@@ -67,14 +67,16 @@ def list_gazette_issues(session: requests.Session, gazette_type: int = 0,
         session: requests session
         gazette_type: 0 = Službeni list CG, 1 = Municipal, etc.
         year: year to fetch
-        max_pages: maximum pages to fetch
 
     Returns:
         List of issue dicts with uuid, date, number
     """
     issues = []
+    page = 1
 
-    for page in range(1, max_pages + 1):
+    while True:
+        found = 0
+
         url = f"{REGISTRY_URL}?type={gazette_type}&year={year}&page={page}"
 
         try:
@@ -94,7 +96,7 @@ def list_gazette_issues(session: requests.Session, gazette_type: int = 0,
                 parts = href.split("/registri/")
                 if len(parts) > 1:
                     uuid = parts[1].split("/")[0].split("?")[0]  # Get UUID, strip any trailing path or params
-                    if not uuid or len(uuid) < 10:
+                    if not uuid:
                         continue
 
                 # Extract text for date/number info
@@ -110,6 +112,8 @@ def list_gazette_issues(session: requests.Session, gazette_type: int = 0,
                 number_match = re.search(r'(\d+)/(\d{4})', text)
                 number = number_match.group(0) if number_match else None
 
+                found += 1
+
                 issues.append({
                     "uuid": uuid,
                     "date": date,
@@ -118,8 +122,10 @@ def list_gazette_issues(session: requests.Session, gazette_type: int = 0,
                 })
 
         # Check if there are more pages
-        if f"page={page + 1}" not in response.text:
+        if found == 0:
             break
+
+        page += 1
 
         time.sleep(REQUEST_DELAY)
 
@@ -157,7 +163,7 @@ def list_documents_in_issue(session: requests.Session, issue_uuid: str) -> list[
             parts = href.split("/propisi/")
             if len(parts) > 1:
                 uuid = parts[1].split("/")[0].split("?")[0]
-                if not uuid or len(uuid) < 10:
+                if not uuid:
                     continue
 
             # Get title from link text or parent
@@ -206,10 +212,7 @@ def download_pdf(session: requests.Session, doc_uuid: str) -> Optional[bytes]:
 def extract_text_from_pdf(pdf_bytes: bytes) -> str:
     """Extract text from PDF using centralized extractor."""
     return extract_pdf_markdown(
-        source="ME/SluzbenList",
-        source_id="",
         pdf_bytes=pdf_bytes,
-        table="legislation",
     ) or ""
 
 def extract_metadata(text: str, doc_uuid: str, issue_info: dict) -> dict:
@@ -305,7 +308,7 @@ def normalize(raw: dict) -> dict:
         "_id": _id,
         "_source": "ME/SluzbenList",
         "_type": "legislation",
-        "_fetched_at": datetime.utcnow().isoformat() + "Z",
+        "_fetched_at": datetime.now(UTC).isoformat(),
         "title": raw.get("title") or f"Document {gazette_number}",
         "text": raw.get("text", ""),
         "date": raw.get("date"),
@@ -316,8 +319,17 @@ def normalize(raw: dict) -> dict:
         "language": "sr-Latn-ME",  # Montenegrin (Latin script)
     }
 
+def make_document_id(doc_uuid: str, gazette_number: str | None) -> str:
+    """Generate document ID without downloading the PDF."""
 
-def fetch_document(session: requests.Session, doc_uuid: str, issue_info: dict) -> Optional[dict]:
+    short_uuid = doc_uuid[:8] if doc_uuid else "unknown"
+
+    if gazette_number:
+        return f"ME-SL-{gazette_number.replace('/', '-')}-{short_uuid}"
+
+    return f"ME-SL-{short_uuid}"
+
+def fetch_document(session: requests.Session, doc_uuid: str, issue_info: dict, doc_id: str, pdf_dir: None) -> Optional[dict]:
     """
     Fetch a single document by UUID.
 
@@ -331,8 +343,24 @@ def fetch_document(session: requests.Session, doc_uuid: str, issue_info: dict) -
     Returns:
         Normalized document dict or None on error
     """
-    print(f"  Downloading PDF...", file=sys.stderr)
-    pdf_bytes = download_pdf(session, doc_uuid)
+    pdf_path = None
+
+    if pdf_dir is not None:
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        pdf_path = pdf_dir / f"{doc_id}.pdf"
+
+    if pdf_path and pdf_path.exists():
+        pdf_bytes = pdf_path.read_bytes()
+    else:
+        print(f"  Downloading PDF...", file=sys.stderr)
+        pdf_bytes = download_pdf(session, doc_uuid)
+
+        if not pdf_bytes:
+            print("  Failed to download PDF", file=sys.stderr)
+            return None
+
+        if pdf_path:
+            pdf_path.write_bytes(pdf_bytes)
 
     if not pdf_bytes:
         print(f"  Failed to download PDF", file=sys.stderr)
@@ -366,7 +394,14 @@ def fetch_document(session: requests.Session, doc_uuid: str, issue_info: dict) -
     return normalize(raw)
 
 
-def fetch_all(session: requests.Session, max_docs: int = 100) -> Iterator[dict]:
+def fetch_all(
+        session,
+        output_dir: Path,
+        from_year,
+        to_year,
+        max_docs=None,
+        pdf_dir=None,
+):
     """
     Fetch all documents.
 
@@ -378,31 +413,49 @@ def fetch_all(session: requests.Session, max_docs: int = 100) -> Iterator[dict]:
         Normalized document dicts
     """
     count = 0
-    current_year = datetime.now().year
 
-    for year in range(current_year, current_year - 3, -1):
+    for year in range(from_year, to_year - 1, -1):
         print(f"Fetching gazette issues for {year}...", file=sys.stderr)
-        issues = list_gazette_issues(session, gazette_type=0, year=year, max_pages=5)
+        issues = list_gazette_issues(session, gazette_type=0, year=year)
         print(f"Found {len(issues)} issues", file=sys.stderr)
 
         for issue in issues:
-            if count >= max_docs:
+            if max_docs is not None and count >= max_docs:
                 return
 
             print(f"Processing issue {issue.get('number')}...", file=sys.stderr)
             docs = list_documents_in_issue(session, issue["uuid"])
             print(f"  Found {len(docs)} documents", file=sys.stderr)
 
-            for doc in docs[:3]:  # Limit docs per issue
-                if count >= max_docs:
+            for doc in docs:
+                if max_docs is not None and count >= max_docs:
                     return
 
-                result = fetch_document(session, doc["uuid"], {
-                    "number": issue.get("number"),
-                    "year": year,
-                    "date": issue.get("date"),
-                    "title": doc.get("title"),
-                })
+                doc_id = make_document_id(
+                    doc["uuid"],
+                    issue.get("number"),
+                )
+
+                filename = output_dir / f"{doc_id}.json"
+
+                if filename.exists():
+                    print(f"Skipping {doc_id}")
+                    continue
+
+                result = fetch_document(
+                    session,
+                    doc["uuid"],
+                    {
+                        "number": issue.get("number"),
+                        "year": year,
+                        "date": issue.get("date"),
+                        "title": doc.get("title"),
+                    },
+                    doc_id=make_document_id(
+                        doc["uuid"],
+                        issue.get("number"),
+                    ),
+                    pdf_dir=pdf_dir)
 
                 if result and result.get("text"):
                     yield result
@@ -425,8 +478,13 @@ def fetch_updates(session: requests.Session, since: str) -> Iterator[dict]:
         Normalized document dicts
     """
     # Fetch recent documents
-    yield from fetch_all(session, max_docs=50)
-
+    yield from fetch_all(
+        session=session,
+        output_dir=Path("/tmp"),
+        from_year=datetime.now().year,
+        to_year=datetime.now().year,
+        max_docs=50,
+    )
 
 def bootstrap_sample(output_dir: Path, sample_size: int = 12):
     """
@@ -447,7 +505,7 @@ def bootstrap_sample(output_dir: Path, sample_size: int = 12):
 
     for year in [current_year, current_year - 1]:
         print(f"Listing issues for {year}...", file=sys.stderr)
-        issues = list_gazette_issues(session, gazette_type=0, year=year, max_pages=2)
+        issues = list_gazette_issues(session, gazette_type=0, year=year)
         all_issues.extend([(issue, year) for issue in issues])
         time.sleep(REQUEST_DELAY)
 
@@ -538,6 +596,30 @@ def main():
         default=12,
         help="Number of samples to fetch"
     )
+    bootstrap_parser.add_argument(
+        "--from-year",
+        type=int,
+        default=datetime.now().year,
+        help="Start downloading from this year (default: current year)"
+    )
+    bootstrap_parser.add_argument(
+        "--to-year",
+        type=int,
+        default=2006,      # первый год существования архива
+        help="Stop at this year"
+    )
+
+    bootstrap_parser.add_argument(
+        "--max-docs",
+        type=int,
+        default=None,
+        help="Maximum number of documents to download"
+    )
+    bootstrap_parser.add_argument(
+        "--pdf-dir",
+        type=Path,
+        help="Directory for caching original PDF files",
+    )
 
     # List command
     list_parser = subparsers.add_parser(
@@ -554,16 +636,48 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "bootstrap" and args.sample:
-        bootstrap_sample(args.output, args.count)
+    if args.command == "bootstrap":
+
+        if args.sample:
+            bootstrap_sample(args.output, args.count)
+            return
+
+        args.output.mkdir(parents=True, exist_ok=True)
+
+        session = get_session()
+
+        downloaded = 0
+
+        for document in fetch_all(
+                session=session,
+                output_dir=args.output,
+                from_year=args.from_year,
+                to_year=args.to_year,
+                max_docs=args.max_docs,
+                pdf_dir=args.pdf_dir,
+        ):
+
+            filename = args.output / f"{document['_id']}.json"
+
+            #
+            # можно продолжить после прерывания
+            #
+            if filename.exists():
+                continue
+
+            with open(filename, "w", encoding="utf-8") as f:
+                json.dump(document, f, ensure_ascii=False, indent=2)
+
+                downloaded += 1
+                print(f"[{downloaded}] {filename.name}")
+
     elif args.command == "list":
         session = get_session()
-        issues = list_gazette_issues(session, year=args.year, max_pages=3)
+        issues = list_gazette_issues(session, year=args.year)
         for issue in issues[:20]:
             print(f"{issue.get('number', 'N/A'):10} | {issue.get('date', 'N/A'):12} | {issue['uuid'][:20]}...")
     else:
         parser.print_help()
-
 
 if __name__ == "__main__":
     main()
