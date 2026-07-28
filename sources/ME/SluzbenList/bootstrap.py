@@ -193,18 +193,26 @@ def download_pdf(session: requests.Session, doc_uuid: str) -> Optional[bytes]:
         PDF bytes or None on error
     """
     url = f"{PROPISI_URL}/{doc_uuid}/download"
+    wait_time = 3.0  # Initial wait time in seconds
 
-    try:
-        response = session.get(url, timeout=60)
-        response.raise_for_status()
+    for attempt in range(10):
+        try:
+            response = session.get(url, timeout=60)
+            response.raise_for_status()
 
-        # Verify it's a PDF
-        if response.headers.get("Content-Type", "").startswith("application/pdf") or \
-           response.content[:4] == b'%PDF':
-            return response.content
+            # Verify it's a PDF
+            if response.headers.get("Content-Type", "").startswith("application/pdf") or \
+               response.content[:4] == b'%PDF':
+                return response.content
+            else:
+                print(f"Failed to download PDF {doc_uuid}: Response is not a PDF (attempt {attempt + 1}/10)", file=sys.stderr)
 
-    except requests.RequestException as e:
-        print(f"Failed to download PDF {doc_uuid}: {e}", file=sys.stderr)
+        except requests.RequestException as e:
+            print(f"Failed to download PDF {doc_uuid} (attempt {attempt + 1}/10): {e}", file=sys.stderr)
+
+        if attempt < 9:
+            time.sleep(wait_time)
+            wait_time *= 2
 
     return None
 
@@ -514,51 +522,55 @@ def bootstrap_sample(output_dir: Path, sample_size: int = 12):
     count = 0
     total_chars = 0
 
-    for issue, year in all_issues:
-        if count >= sample_size:
-            break
-
-        issue_number = issue.get("number", "unknown")
-        print(f"\nProcessing issue {issue_number}...", file=sys.stderr)
-
-        # Get documents in this issue
-        docs = list_documents_in_issue(session, issue["uuid"])
-        print(f"  Found {len(docs)} documents", file=sys.stderr)
-        time.sleep(REQUEST_DELAY)
-
-        for doc in docs[:2]:  # Max 2 per issue
+    try:
+        for issue, year in all_issues:
             if count >= sample_size:
                 break
 
-            doc_title = doc.get("title", "")[:50] or doc["uuid"][:20]
-            print(f"\n  Fetching: {doc_title}...", file=sys.stderr)
+            issue_number = issue.get("number", "unknown")
+            print(f"\nProcessing issue {issue_number}...", file=sys.stderr)
 
-            result = fetch_document(session, doc["uuid"], {
-                "number": issue.get("number"),
-                "year": year,
-                "date": issue.get("date"),
-                "title": doc.get("title"),
-            })
-
-            if result and result.get("text"):
-                text_len = len(result["text"])
-
-                if text_len < 200:
-                    print(f"    Skipping (text too short: {text_len} chars)", file=sys.stderr)
-                    continue
-
-                # Save to file
-                filename = f"{result['_id']}.json"
-                filepath = output_dir / filename
-
-                with open(filepath, "w", encoding="utf-8") as f:
-                    json.dump(result, f, ensure_ascii=False, indent=2)
-
-                print(f"    Saved: {filename} ({text_len:,} chars)", file=sys.stderr)
-                total_chars += text_len
-                count += 1
-
+            # Get documents in this issue
+            docs = list_documents_in_issue(session, issue["uuid"])
+            print(f"  Found {len(docs)} documents", file=sys.stderr)
             time.sleep(REQUEST_DELAY)
+
+            for doc in docs[:2]:  # Max 2 per issue
+                if count >= sample_size:
+                    break
+
+                doc_title = doc.get("title", "")[:50] or doc["uuid"][:20]
+                print(f"\n  Fetching: {doc_title}...", file=sys.stderr)
+
+                result = fetch_document(session, doc["uuid"], {
+                    "number": issue.get("number"),
+                    "year": year,
+                    "date": issue.get("date"),
+                    "title": doc.get("title"),
+                })
+
+                if result and result.get("text"):
+                    text_len = len(result["text"])
+
+                    if text_len < 200:
+                        print(f"    Skipping (text too short: {text_len} chars)", file=sys.stderr)
+                        continue
+
+                    # Save to file
+                    filename = f"{result['_id']}.json"
+                    filepath = output_dir / filename
+
+                    with open(filepath, "w", encoding="utf-8") as f:
+                        json.dump(result, f, ensure_ascii=False, indent=2)
+
+                    print(f"    Saved: {filename} ({text_len:,} chars)", file=sys.stderr)
+                    total_chars += text_len
+                    count += 1
+
+                time.sleep(REQUEST_DELAY)
+    except (KeyboardInterrupt, SystemExit):
+        print(f"\nInterrupted. Saved {count} sample documents.", file=sys.stderr)
+        sys.exit(0)
 
     print(f"\n{'='*50}", file=sys.stderr)
     print(f"Sample complete:", file=sys.stderr)
@@ -648,28 +660,32 @@ def main():
 
         downloaded = 0
 
-        for document in fetch_all(
-                session=session,
-                output_dir=args.output,
-                from_year=args.from_year,
-                to_year=args.to_year,
-                max_docs=args.max_docs,
-                pdf_dir=args.pdf_dir,
-        ):
+        try:
+            for document in fetch_all(
+                    session=session,
+                    output_dir=args.output,
+                    from_year=args.from_year,
+                    to_year=args.to_year,
+                    max_docs=args.max_docs,
+                    pdf_dir=args.pdf_dir,
+            ):
 
-            filename = args.output / f"{document['_id']}.json"
+                filename = args.output / f"{document['_id']}.json"
 
-            #
-            # можно продолжить после прерывания
-            #
-            if filename.exists():
-                continue
+                #
+                # можно продолжить после прерывания
+                #
+                if filename.exists():
+                    continue
 
-            with open(filename, "w", encoding="utf-8") as f:
-                json.dump(document, f, ensure_ascii=False, indent=2)
+                with open(filename, "w", encoding="utf-8") as f:
+                    json.dump(document, f, ensure_ascii=False, indent=2)
 
-                downloaded += 1
-                print(f"[{downloaded}] {filename.name}")
+                    downloaded += 1
+                    print(f"[{downloaded}] {filename.name}")
+        except (KeyboardInterrupt, SystemExit):
+            print(f"\nInterrupted. Downloaded {downloaded} documents.", file=sys.stderr)
+            sys.exit(0)
 
     elif args.command == "list":
         session = get_session()
