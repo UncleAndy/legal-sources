@@ -32,6 +32,8 @@ from typing import Generator, Optional
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 
+import requests
+
 from common.base_scraper import BaseScraper
 from common.http_client import HttpClient
 
@@ -47,6 +49,17 @@ DETAIL_PATH = "/1093/Detalii-jurisprudenta"
 # Approximate max ID as of April 2026
 APPROX_MAX_ID = 235000
 
+# scj.ro is periodically unreachable at the TCP layer (see #1475: DNS resolves,
+# but ICMP, :80 and :443 all time out from datacenter *and* residential
+# vantages). Every request then fails identically, which used to look exactly
+# like a run of missing IDs. Stop and say so instead of walking the ID space.
+MAX_CONSECUTIVE_TRANSPORT_FAILURES = 20
+
+
+class SourceBlockedError(RuntimeError):
+    """Raised when scj.ro is unreachable, so the run fails loud rather than
+    reporting an empty corpus as a successful crawl."""
+
 
 class RoICCJScraper(BaseScraper):
     """
@@ -61,6 +74,19 @@ class RoICCJScraper(BaseScraper):
     def __init__(self):
         source_dir = Path(__file__).parent
         super().__init__(source_dir)
+
+        # Sequential-ID walks over ~250K IDs cannot finish in one fleet slot
+        # (exit 124 / 100h). Persist progress so reruns resume instead of
+        # restarting at ID 1 (see #1100, mirrors the #961 PK/IHC checkpoint fix).
+        self._sample_mode = False
+        self._ckpt_path = source_dir / "data" / "iccj_checkpoint.json"
+        self._ckpt_last = 0
+
+        # Reachability tracking, so a dead host is never mistaken for a gap in
+        # the ID space (#1475).
+        self._any_success = False
+        self._consecutive_transport_failures = 0
+        self._last_fetch_reachable = True
 
         self.client = HttpClient(
             base_url=BASE_URL,
@@ -79,10 +105,78 @@ class RoICCJScraper(BaseScraper):
         try:
             resp = self.client.get(url)
             resp.raise_for_status()
-            return resp.text
+        except (requests.exceptions.ConnectionError,
+                requests.exceptions.Timeout,
+                requests.exceptions.RetryError,
+                requests.exceptions.SSLError) as e:
+            # The host did not answer at all. This says nothing about whether
+            # decision_id exists, so it must not count as a miss.
+            self._last_fetch_reachable = False
+            self._consecutive_transport_failures += 1
+            logger.warning(
+                f"scj.ro unreachable fetching ID {decision_id} "
+                f"({self._consecutive_transport_failures} in a row): {e}"
+            )
+            if self._consecutive_transport_failures >= MAX_CONSECUTIVE_TRANSPORT_FAILURES:
+                raise SourceBlockedError(
+                    f"www.scj.ro unreachable: {self._consecutive_transport_failures} "
+                    f"consecutive connection failures (last ID {decision_id}). "
+                    "DNS resolves but the host answers on neither :80 nor :443 — "
+                    "see issue #1475. Aborting instead of reporting an empty crawl."
+                ) from e
+            return None
         except Exception as e:
+            # A real HTTP answer (404 and friends) — the host is alive, this ID
+            # simply has no decision behind it.
+            self._last_fetch_reachable = True
+            self._consecutive_transport_failures = 0
             logger.warning(f"Failed to fetch ID {decision_id}: {e}")
             return None
+
+        self._last_fetch_reachable = True
+        self._any_success = True
+        self._consecutive_transport_failures = 0
+        return resp.text
+
+    # -- Checkpoint / resume --------------------------------------------------
+
+    def _load_checkpoint(self) -> int:
+        """Return the last fully-processed decision ID (0 if none)."""
+        try:
+            data = json.loads(self._ckpt_path.read_text())
+            self._ckpt_last = int(data.get("last_id", 0))
+        except Exception:
+            self._ckpt_last = 0
+        return self._ckpt_last
+
+    def _flush_checkpoint(self):
+        """Persist the current checkpoint position to disk."""
+        try:
+            self._ckpt_path.parent.mkdir(parents=True, exist_ok=True)
+            self._ckpt_path.write_text(json.dumps({"last_id": self._ckpt_last}))
+        except Exception as e:
+            logger.warning(f"Could not write checkpoint: {e}")
+
+    def _advance_checkpoint(self, decision_id: int):
+        """Record progress up to decision_id, flushing every 100 IDs."""
+        if self._sample_mode:
+            return
+        self._ckpt_last = decision_id
+        if decision_id % 100 == 0:
+            self._flush_checkpoint()
+
+    # scj.ro publishes only modern (post-1990s digitised) ICCJ decisions. Source
+    # data occasionally carries OCR/typo years (e.g. "2913" for 2013, "1004" for
+    # 2004) that produced an absurd reported date_range of 1004–2913 (issue #1185).
+    # Reject any parsed year outside a plausible window.
+    MIN_VALID_YEAR = 1990
+
+    def _valid_year(self, year) -> bool:
+        try:
+            y = int(year)
+        except (TypeError, ValueError):
+            return False
+        return self.MIN_VALID_YEAR <= y <= datetime.now(timezone.utc).year + 1
 
     def _parse_detail(self, html_content: str, decision_id: int) -> Optional[dict]:
         """Parse a detail page HTML into a raw record dict."""
@@ -130,7 +224,7 @@ class RoICCJScraper(BaseScraper):
                 header_text,
                 re.IGNORECASE,
             )
-            if date_match:
+            if date_match and self._valid_year(date_match.group(3)):
                 day, month_name, year = date_match.groups()
                 month_map = {
                     "ianuarie": "01", "februarie": "02", "martie": "03",
@@ -189,7 +283,7 @@ class RoICCJScraper(BaseScraper):
                 text,
                 re.IGNORECASE,
             )
-            if date_match:
+            if date_match and self._valid_year(date_match.group(3)):
                 day, month_name, year = date_match.groups()
                 month_map = {
                     "ianuarie": "01", "februarie": "02", "martie": "03",
@@ -199,6 +293,16 @@ class RoICCJScraper(BaseScraper):
                 }
                 month = month_map.get(month_name.lower(), "01")
                 decision_date = f"{year}-{month}-{int(day):02d}"
+
+        # Fallback: derive a year-level date from the decision number (nr. N/YYYY).
+        # ICCJ decision numbers embed the ruling year, so a null date (which drops
+        # the record at ingest as a temporal_key with no value) is always avoidable.
+        if not decision_date:
+            year_match = re.search(r"/(\d{4})", decision_number or "") or re.search(
+                r"/(\d{4})", title or ""
+            )
+            if year_match and self._valid_year(year_match.group(1)):
+                decision_date = f"{year_match.group(1)}-01-01"
 
         return {
             "decision_id": decision_id,
@@ -251,24 +355,51 @@ class RoICCJScraper(BaseScraper):
             else:
                 hi = mid
 
+        # Every probe failing collapses the search to lo == 1, which fetch_all
+        # would happily read as "the corpus is one decision long" and finish
+        # with zero records and a success exit (#1475).
+        if not self._any_success:
+            raise SourceBlockedError(
+                "Could not reach a single scj.ro detail page while probing for "
+                "the max decision ID — refusing to report an empty corpus. "
+                "See issue #1475."
+            )
+
         logger.info(f"Current max decision ID: {lo}")
         return lo
 
     # -- BaseScraper interface -----------------------------------------------
 
     def fetch_all(self) -> Generator[dict, None, None]:
-        """Yield all decisions by iterating through IDs."""
+        """Yield all decisions by iterating through IDs.
+
+        Resumes from the last checkpointed ID so a fleet rerun (after the 100h
+        timeout) continues forward instead of re-walking from ID 1. Sample runs
+        never read or write the checkpoint.
+        """
         max_id = self._find_max_id()
         consecutive_misses = 0
         max_misses = 50  # Allow gaps in IDs
 
-        for decision_id in range(1, max_id + 1):
+        start_id = 1
+        if not self._sample_mode:
+            start_id = self._load_checkpoint() + 1
+            if start_id > 1:
+                logger.info(f"Resuming from checkpoint at ID {start_id}")
+
+        for decision_id in range(start_id, max_id + 1):
             html = self._fetch_detail(decision_id)
             if not html:
+                if not self._last_fetch_reachable:
+                    # Host down, not a missing ID. Advancing the checkpoint here
+                    # would mark every unfetched decision as done and make the
+                    # gap permanent across reruns (#1475).
+                    continue
                 consecutive_misses += 1
                 if consecutive_misses > max_misses:
                     logger.warning(f"Too many consecutive misses at ID {decision_id}, skipping ahead")
                     consecutive_misses = 0
+                self._advance_checkpoint(decision_id)
                 continue
 
             record = self._parse_detail(html, decision_id)
@@ -278,8 +409,16 @@ class RoICCJScraper(BaseScraper):
             else:
                 consecutive_misses += 1
 
+            # Safe to checkpoint here: any record yielded above has already been
+            # persisted by the framework loop before control returns to us.
+            self._advance_checkpoint(decision_id)
+
             if decision_id % 1000 == 0:
                 logger.info(f"Progress: ID {decision_id}/{max_id}")
+
+        # Reached the end of the corpus — flush final position.
+        if not self._sample_mode:
+            self._flush_checkpoint()
 
     def fetch_updates(self, since: datetime) -> Generator[dict, None, None]:
         """Fetch decisions added since the last run by checking new IDs."""
@@ -292,6 +431,8 @@ class RoICCJScraper(BaseScraper):
         for decision_id in range(last_max + 1, current_max + 1):
             html = self._fetch_detail(decision_id)
             if not html:
+                if not self._last_fetch_reachable:
+                    continue
                 consecutive_misses += 1
                 if consecutive_misses > 50:
                     break
@@ -328,18 +469,30 @@ if __name__ == "__main__":
     scraper = RoICCJScraper()
 
     if len(sys.argv) < 2:
-        print("Usage: python bootstrap.py [bootstrap|update|test-api] [--sample]")
+        print("Usage: python bootstrap.py [bootstrap|bootstrap-fast|update|test-api] [--sample]")
         sys.exit(1)
 
     command = sys.argv[1]
     sample_mode = "--sample" in sys.argv
 
-    if command == "bootstrap":
-        result = scraper.bootstrap(sample_mode=sample_mode, sample_size=15)
+    # The fleet wrapper invokes `bootstrap-fast`; without the alias it fell
+    # through to "Unknown command" and the wrapper re-ingested sample/ as if
+    # the crawl had succeeded.
+    if command in ("bootstrap", "bootstrap-fast"):
+        scraper._sample_mode = sample_mode
+        try:
+            result = scraper.bootstrap(sample_mode=sample_mode, sample_size=15)
+        except SourceBlockedError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(2)
         print(json.dumps(result, indent=2, default=str))
 
     elif command == "update":
-        result = scraper.update()
+        try:
+            result = scraper.update()
+        except SourceBlockedError as e:
+            print(f"ERROR: {e}", file=sys.stderr)
+            sys.exit(2)
         print(json.dumps(result, indent=2, default=str))
 
     elif command == "test-api":

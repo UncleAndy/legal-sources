@@ -114,13 +114,29 @@ class CSJNScraper(BaseScraper):
     # -- PDF text extraction -------------------------------------------------
 
     def _extract_text_from_pdf(self, id_documento: int) -> Optional[str]:
-        """Extract text from PDF using centralized extractor."""
+        """Download the decision PDF by its document ID and extract full text."""
+        try:
+            resp = self.client.get(
+                PDF_URL,
+                params={"idDocumento": id_documento},
+                timeout=60,
+            )
+            if resp is None or resp.status_code != 200:
+                return None
+            ct = resp.headers.get("Content-Type", "")
+            if "pdf" not in ct and len(resp.content) < 500:
+                return None
+        except Exception as e:
+            logger.debug(f"PDF download failed for doc {id_documento}: {e}")
+            return None
+
         return extract_pdf_markdown(
             source="AR/CSJNDatosAbiertos",
-            source_id="",
-            pdf_bytes=id_documento,
+            source_id=str(id_documento),
+            pdf_bytes=resp.content,
             table="case_law",
-        ) or ""
+            force=True,
+        )
 
     # -- Date parsing --------------------------------------------------------
 
@@ -405,8 +421,14 @@ if __name__ == "__main__":
         ok = scraper.test_api()
         sys.exit(0 if ok else 1)
 
-    elif command == "bootstrap":
-        sample_mode = "--sample" in sys.argv
+    elif command in ("bootstrap", "bootstrap-fast"):
+        # bootstrap-fast is the VPS fleet entrypoint and must sweep the FULL
+        # corpus. Only `bootstrap --sample` writes the 15-record validation set
+        # to sample/; every full run now streams the whole corpus to
+        # data/records.jsonl via BaseScraper.storage. Previously the full run
+        # wrote into sample/ (and bootstrap-fast wasn't recognized at all), so
+        # the fleet only ever ingested ~13 records.
+        sample_mode = "--sample" in sys.argv and command == "bootstrap"
         count = 15
         for i, arg in enumerate(sys.argv):
             if arg == "--count" and i + 1 < len(sys.argv):
@@ -414,22 +436,20 @@ if __name__ == "__main__":
 
         if sample_mode:
             gen = scraper.fetch_sample(count=count)
+            sample_dir = Path(__file__).parent / "sample"
+            sample_dir.mkdir(exist_ok=True)
+            saved = 0
+            for record in gen:
+                normalized = scraper.normalize(record)
+                out_path = sample_dir / f"{normalized['_id']}.json"
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(normalized, f, ensure_ascii=False, indent=2)
+                saved += 1
+                logger.info(f"Saved: {out_path.name}")
+            logger.info(f"Bootstrap complete: {saved} records saved to {sample_dir}")
         else:
-            gen = scraper.fetch_all()
-
-        sample_dir = Path(__file__).parent / "sample"
-        sample_dir.mkdir(exist_ok=True)
-
-        saved = 0
-        for record in gen:
-            normalized = scraper.normalize(record)
-            out_path = sample_dir / f"{normalized['_id']}.json"
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(normalized, f, ensure_ascii=False, indent=2)
-            saved += 1
-            logger.info(f"Saved: {out_path.name}")
-
-        logger.info(f"Bootstrap complete: {saved} records saved to {sample_dir}")
+            stats = scraper.bootstrap(sample_mode=False)
+            logger.info(f"Bootstrap complete: {stats}")
 
     elif command == "update":
         since_str = None

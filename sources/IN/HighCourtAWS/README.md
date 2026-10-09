@@ -15,33 +15,37 @@ dating back to 1950.
 
 ## Strategy
 
-1. Lists JSON metadata files via S3 REST API (no AWS credentials needed)
-2. Downloads corresponding PDFs from the `data/pdf/` prefix
-3. Extracts full text from PDFs using pdfplumber
-4. Parses case metadata (parties, judges, dates, CNR) from JSON raw_html field
+1. Requires one exact `(year, court, bench)` shard per job.
+2. Streams the shard's raw PDF tar parts under fixed memory caps.
+3. Joins each PDF to the matching bundled JSON metadata.
+4. Writes to hidden staging, then atomically publishes `data/` only after exact inventory and every judgment pass; failures retry from zero in a new job directory.
 
 ## S3 Structure
 
-```
-metadata/json/year=YYYY/court=X_Y/bench=ZZZ/CNRXXX_N_YYYY-MM-DD.json
-data/pdf/year=YYYY/court=X_Y/bench=ZZZ/CNRXXX_N_YYYY-MM-DD.pdf
+```text
+data/tar/year=YYYY/court=X_Y/bench=ZZZ/data.index.json
+data/tar/year=YYYY/court=X_Y/bench=ZZZ/data.tar
+metadata/tar/year=YYYY/court=X_Y/bench=ZZZ/metadata.index.json
+metadata/tar/year=YYYY/court=X_Y/bench=ZZZ/metadata.tar.gz
 ```
 
 ## Usage
 
 ```bash
-python bootstrap.py test               # Connectivity test
-python bootstrap.py bootstrap --sample # Fetch 15 sample records
-python bootstrap.py bootstrap          # Full fetch (very large dataset)
-python bootstrap.py update             # Incremental update
+python bootstrap.py test
+python bootstrap.py bootstrap --sample --sample-size 15 --output-dir /tmp/highcourtaws-sample
+python bootstrap.py bootstrap --year-range 2024 --court 11_24 --bench sikkimhc_pg \
+  --workers 4 --output-dir /srv/highcourtaws/jobs/2024-11_24-sikkimhc_pg
 ```
+
+Each worker must use a new or empty non-symlink output directory and one scraper instance per attempt. Preserve failed-job evidence and rerun the same queue item from zero in a fresh isolated directory.
 
 ## Notes
 
-- S3 bucket is in ap-south-1 (Mumbai); connections may be slow from other regions
-- PDF text extraction works well for English-language judgments
-- Some older judgments may be scanned images (no extractable text)
-- The full dataset is ~1.11 TB; full bootstrap is not recommended locally
+- S3 bucket is in ap-south-1 (Mumbai); connections may be slow from other regions.
+- The full dataset is ~1.11 TB in PDFs; workers stream archive members without retaining tar files.
+- The scraper yields raw dicts from `fetch_all()` and lets `BaseScraper` call `normalize()`.
+- Deduplication remains keyed on `cnr_number`.
 
 ## License
 

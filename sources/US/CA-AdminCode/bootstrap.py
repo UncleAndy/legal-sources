@@ -25,6 +25,7 @@ import json
 import logging
 import re
 import time
+import threading
 import html as html_module
 from pathlib import Path
 from datetime import datetime, timezone
@@ -94,16 +95,52 @@ class CAAdminCodeScraper(BaseScraper):
                 "User-Agent": "LegalDataHunter/1.0 (open-data research project; +https://github.com/worldwidelaw/legal-sources)",
                 "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             },
-            timeout=60,
+            # Explicit (connect, read) timeout so a single socket read cannot block
+            # forever. requests' read timeout only fires on *no* bytes for the window,
+            # so we ALSO wrap each fetch in a hard wall-clock guard below (#1169).
+            timeout=(15, 45),
         )
         self.delay = 10.0  # robots.txt crawl-delay
+        # Hard wall-clock ceiling per request. A slow-trickle / half-open connection
+        # can defeat requests' read timeout (bytes arrive just often enough); this
+        # guarantees one wedged title fetch cannot stall the whole run (#1169, cf.
+        # PT/ROA #1168). Must exceed the (connect+read) budget so normal slow pages
+        # aren't killed prematurely.
+        self.request_deadline = 90.0
+
+    def _get_once(self, url: str) -> "requests.Response":
+        """Single HTTP GET wrapped in a daemon-thread wall-clock guard.
+
+        Returns the Response, or raises TimeoutError if the request does not
+        complete within self.request_deadline seconds. The worker is a daemon
+        thread so a truly wedged socket is abandoned (not joined) and cannot
+        keep the process alive.
+        """
+        result = {}
+
+        def worker():
+            try:
+                result["resp"] = self.http.get(url)
+            except Exception as e:  # noqa: BLE001 - propagated to caller below
+                result["exc"] = e
+
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+        t.join(self.request_deadline)
+        if t.is_alive():
+            raise TimeoutError(
+                f"wall-clock deadline {self.request_deadline}s exceeded"
+            )
+        if "exc" in result:
+            raise result["exc"]
+        return result["resp"]
 
     def _get(self, url: str, retries: int = 2) -> str:
-        """Fetch URL with rate limiting and retries."""
+        """Fetch URL with rate limiting, wall-clock guard, and retries."""
         for attempt in range(retries + 1):
             time.sleep(self.delay)
             try:
-                resp = self.http.get(url)
+                resp = self._get_once(url)
                 if resp.status_code == 200:
                     return resp.text
                 if resp.status_code == 429:
@@ -115,6 +152,10 @@ class CAAdminCodeScraper(BaseScraper):
                     logger.debug(f"404: {url}")
                     return ""
                 logger.warning(f"HTTP {resp.status_code} for {url}")
+            except TimeoutError as e:
+                logger.warning(f"Timeout fetching {url}: {e} — skipping/retrying")
+                if attempt < retries:
+                    time.sleep(5)
             except Exception as e:
                 logger.warning(f"Error fetching {url}: {e}")
                 if attempt < retries:
@@ -418,29 +459,35 @@ class CAAdminCodeScraper(BaseScraper):
                     logger.warning(f"  No text for {sec_path}")
             logger.info(f"Sample complete: {count} records saved to {sample_dir}")
         else:
+            # Delegate to BaseScraper: it normalizes each raw record and streams
+            # the corpus to data/records.jsonl, which is what the ingest pipeline
+            # reads. The previous loop wrote raw records (no `_id` — fetch_all
+            # yields the un-normalized dict) as ~30K files under sample/, so it
+            # raised KeyError immediately and nothing was ever ingested (#1348).
             logger.info("Running FULL bootstrap")
-            count = 0
-            for record in self.fetch_all():
-                out_file = sample_dir / f"{record['_id'].replace('/', '_')}.json"
-                out_file.write_text(json.dumps(record, indent=2, ensure_ascii=False))
-                count += 1
-                if count % 100 == 0:
-                    logger.info(f"  Progress: {count} records saved")
-            logger.info(f"Full bootstrap complete: {count} records")
+            stats = super().bootstrap_fast()
+            logger.info(
+                f"Full bootstrap complete: {stats.get('records_new', 0)} records "
+                f"written ({stats.get('errors', 0)} errors)"
+            )
+            return stats
 
 
 def main():
     scraper = CAAdminCodeScraper()
 
     if len(sys.argv) < 2:
-        print("Usage: python bootstrap.py [test-api|bootstrap] [--sample]")
+        print("Usage: python bootstrap.py [test-api|bootstrap|bootstrap-fast] [--sample|--full]")
         sys.exit(1)
 
     cmd = sys.argv[1]
     if cmd == "test-api":
         ok = scraper.test_api()
         sys.exit(0 if ok else 1)
-    elif cmd == "bootstrap":
+    elif cmd in ("bootstrap", "bootstrap-fast"):
+        # The fleet wrapper invokes `bootstrap-fast`; treat it as the full run
+        # so it doesn't fall through to "Unknown command" and get downgraded to
+        # the committed samples.
         sample = "--sample" in sys.argv
         scraper.bootstrap(sample=sample)
     else:

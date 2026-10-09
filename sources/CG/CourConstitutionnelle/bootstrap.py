@@ -9,7 +9,7 @@ Strategy:
   - JSON API at /api/documents?type=DECISION_COUR_CONSTITUTIONNELLE&page=N&limit=20
   - Also fetches AVIS (opinions) — same API, different type
   - Each document has a fileUrl pointing to a PDF
-  - Download PDF, extract text with PyPDF2
+  - Download PDF, extract text via common.pdf_extract (pdfplumber/pypdf/OCR chain)
   - ~54 documents total (41 decisions + 2 avis + others)
 
 Usage:
@@ -61,7 +61,19 @@ SESSION.headers.update({
 
 
 def _extract_pdf_text(pdf_bytes: bytes) -> str:
-    """Extract text from PDF bytes using PyPDF2."""
+    """Extract text from PDF bytes via the shared multi-backend extractor.
+
+    Uses common.pdf_extract's chain (opendataloader → pdfplumber → pypdf →
+    OCR) so extraction does not depend on PyPDF2, which is absent from the
+    fleet VPS image (issue #1242). Falls back to PyPDF2 only if the shared
+    helper itself is unavailable.
+    """
+    try:
+        from common.pdf_extract import _extract as _shared_extract
+        return (_shared_extract(pdf_bytes) or "").strip()
+    except Exception as e:
+        logger.warning("shared PDF extraction failed: %s", e)
+
     try:
         import PyPDF2
         reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
@@ -234,7 +246,8 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(description="CG/CourConstitutionnelle bootstrapper")
-    parser.add_argument("command", choices=["bootstrap", "test", "update"],
+    parser.add_argument("command",
+                        choices=["bootstrap", "bootstrap-fast", "test", "update"],
                         help="Command to run")
     parser.add_argument("--sample", action="store_true",
                         help="Only fetch ~15 sample records")
@@ -256,26 +269,40 @@ def main():
             sys.exit(1)
         return
 
-    sample_dir = source_dir / "sample"
-    sample_dir.mkdir(exist_ok=True)
+    # Only `bootstrap --sample` writes the 15-record validation set to sample/.
+    # bootstrap-fast (VPS fleet entrypoint) and a plain full `bootstrap` sweep
+    # the whole corpus and STREAM to data/records.jsonl via the storage manager.
+    # fetch_all() here yields ALREADY-NORMALIZED records, so we write them
+    # directly (routing through BaseScraper.bootstrap would double-normalize and
+    # drop the _id/date). Previously the full run wrote into sample/ and
+    # bootstrap-fast wasn't recognized at all → the fleet ingested only ~15.
+    sample_mode = args.sample and args.command == "bootstrap"
 
-    records = []
-    gen = scraper.fetch_all() if not args.sample else scraper._fetch_documents(sample=True)
-
-    for record in gen:
-        records.append(record)
-        fname = re.sub(r'[^\w\-.]', '_', record["_id"])[:80] + ".json"
-        with open(sample_dir / fname, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
-
-    logger.info("Done. %d records saved to %s", len(records), sample_dir)
-
-    text_lens = [len(r.get("text", "")) for r in records]
-    if text_lens:
-        logger.info(
-            "Text stats: min=%d, max=%d, avg=%d chars",
-            min(text_lens), max(text_lens), sum(text_lens) // len(text_lens),
-        )
+    if sample_mode:
+        sample_dir = source_dir / "sample"
+        sample_dir.mkdir(exist_ok=True)
+        records = []
+        for record in scraper._fetch_documents(sample=True):
+            records.append(record)
+            fname = re.sub(r'[^\w\-.]', '_', record["_id"])[:80] + ".json"
+            with open(sample_dir / fname, "w", encoding="utf-8") as f:
+                json.dump(record, f, ensure_ascii=False, indent=2)
+        logger.info("Done. %d records saved to %s", len(records), sample_dir)
+        text_lens = [len(r.get("text", "")) for r in records]
+        if text_lens:
+            logger.info(
+                "Text stats: min=%d, max=%d, avg=%d chars",
+                min(text_lens), max(text_lens), sum(text_lens) // len(text_lens),
+            )
+    else:
+        written = 0
+        for record in scraper.fetch_all():
+            if not record.get("_id"):
+                continue
+            scraper.storage.write(scraper._dedup_key(record), record)
+            written += 1
+        scraper.storage.flush()
+        logger.info("Full bootstrap complete: %d records → data/records.jsonl", written)
 
 
 if __name__ == "__main__":

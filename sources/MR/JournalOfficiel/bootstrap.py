@@ -49,6 +49,21 @@ from common.http_client import HttpClient
 
 from common.pdf_extract import extract_pdf_markdown
 
+# PyPDF2 is used directly below (page-count + text extraction) but was never
+# imported — bootstrap_fast died with `NameError: HAS_PYPDF2 is not defined`.
+# Guard the import and fall back to pypdf, the maintained successor whose
+# PdfReader API is compatible; fleet VPS environments install pypdf, not the
+# legacy PyPDF2 distribution name.
+try:
+    import PyPDF2
+    HAS_PYPDF2 = True
+except ImportError:
+    try:
+        import pypdf as PyPDF2
+        HAS_PYPDF2 = True
+    except ImportError:
+        HAS_PYPDF2 = False
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -407,4 +422,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # `bootstrap-fast` is the fleet runner's entry point; this CLI
+    # dispatches on the literal command name, so alias it onto the full
+    # bootstrap rather than exiting 1 (VPS CLI mismatch, issue #602).
+    if len(sys.argv) > 1 and sys.argv[1] == "bootstrap-fast":
+        sys.argv[1] = "bootstrap"
     main()

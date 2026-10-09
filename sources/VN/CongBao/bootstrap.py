@@ -17,10 +17,8 @@ resolutions, consolidated texts.
 import html as html_mod
 import json
 import logging
-import os
 import re
 import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -38,15 +36,58 @@ HEADERS = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) LegalD
 try:
     import urllib.request
     import urllib.parse
+    import urllib.error
+    import ssl
 except ImportError:
     pass
+
+# Hosts (e.g. the chinhphu CDN g7.cdnchinhphu.vn) that serve an incomplete
+# certificate chain — the server omits its intermediate CA, so clients whose
+# trust store lacks a cached copy of that intermediate (typically the fleet
+# Linux VPS) get SSL: CERTIFICATE_VERIFY_FAILED even though the leaf is valid.
+# Python's ssl does not do AIA chasing to recover the missing intermediate,
+# so for these government-CDN hosts only we fall back to an unverified context
+# on a verification failure. See issue #1236.
+_INCOMPLETE_CHAIN_HOSTS = ("cdnchinhphu.vn",)
+
+
+def _build_ssl_context() -> "Optional[ssl.SSLContext]":
+    """Verifying context, preferring the certifi CA bundle when available."""
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        try:
+            return ssl.create_default_context()
+        except Exception:
+            return None
+
+
+def _host_allows_unverified(url: str) -> bool:
+    host = urllib.parse.urlsplit(url).hostname or ""
+    return any(host == h or host.endswith("." + h) for h in _INCOMPLETE_CHAIN_HOSTS)
+
+
+def _urlopen(url: str, timeout: int):
+    """urlopen with a certifi context, falling back to an unverified context
+    for known incomplete-chain CDN hosts on a certificate-verification error."""
+    req = urllib.request.Request(url, headers=HEADERS)
+    ctx = _build_ssl_context()
+    try:
+        return urllib.request.urlopen(req, timeout=timeout, context=ctx)
+    except urllib.error.URLError as e:
+        is_cert_err = isinstance(getattr(e, "reason", None), ssl.SSLError) or isinstance(e, ssl.SSLError)
+        if is_cert_err and _host_allows_unverified(url):
+            logger.warning(f"TLS verify failed for {url[:80]} — retrying unverified (incomplete-chain CDN host)")
+            unverified = ssl._create_unverified_context()
+            return urllib.request.urlopen(req, timeout=timeout, context=unverified)
+        raise
 
 
 def http_get(url: str, timeout: int = 30) -> Optional[str]:
     """Fetch a URL and return decoded text, or None on failure."""
-    req = urllib.request.Request(url, headers=HEADERS)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(url, timeout) as resp:
             return resp.read().decode("utf-8", errors="replace")
     except Exception as e:
         logger.warning(f"HTTP GET failed for {url[:120]}: {e}")
@@ -55,9 +96,8 @@ def http_get(url: str, timeout: int = 30) -> Optional[str]:
 
 def http_download(url: str, timeout: int = 60) -> Optional[bytes]:
     """Download binary content from a URL."""
-    req = urllib.request.Request(url, headers=HEADERS)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(url, timeout) as resp:
             return resp.read()
     except Exception as e:
         logger.warning(f"Download failed for {url[:120]}: {e}")
@@ -174,13 +214,30 @@ class CongBaoFetcher:
         self.delay = DELAY
 
     def get_total_pages(self) -> int:
-        """Get total number of listing pages."""
+        """Get total number of listing pages.
+
+        Returns -1 when the listing root could not be fetched at all (network
+        block / connection reset — typical of a datacenter-IP block on VN gov
+        hosts) so callers can distinguish "host unreachable" from a genuine
+        "0 pages". Returns 0 only when the page loaded but the pagination token
+        is absent (real upstream markup change worth investigating).
+        """
         url = BASE_URL + "/van-ban-dang-cong-bao.htm"
         data = http_get(url)
         if not data:
-            return 0
+            logger.error(
+                "Listing root %s unreachable (empty response) — likely a "
+                "datacenter-IP block; cannot determine page count", url
+            )
+            return -1
         m = re.search(r"totalPageSodo\s*=\s*(\d+)", data)
-        return int(m.group(1)) if m else 0
+        if not m:
+            logger.error(
+                "Pagination token 'totalPageSodo' not found on %s — upstream "
+                "markup may have changed", url
+            )
+            return 0
+        return int(m.group(1))
 
     def list_documents(self, page: int) -> List[Dict[str, str]]:
         """Fetch one listing page and return document URLs with titles."""
@@ -270,7 +327,12 @@ class CongBaoFetcher:
             "page_url": url,
         }
 
-    def fetch_full_text(self, docx_url: Optional[str], pdf_url: Optional[str]) -> Optional[str]:
+    def fetch_full_text(
+        self,
+        docx_url: Optional[str],
+        pdf_url: Optional[str],
+        source_id: str = "",
+    ) -> Optional[str]:
         """Download and extract full text from DOCX (preferred) or PDF."""
         if docx_url:
             content = http_download(docx_url, timeout=60)
@@ -285,14 +347,21 @@ class CongBaoFetcher:
             if content:
                 try:
                     from common.pdf_extract import extract_pdf_markdown
-                    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
-                        f.write(content)
-                        tmp_path = f.name
-                    try:
-                        text = extract_pdf_markdown(tmp_path)
-                        return text.strip() if text and len(text) > 50 else None
-                    finally:
-                        os.unlink(tmp_path)
+                    # extract_pdf_markdown takes (source, source_id) and bytes or a
+                    # URL — never a filesystem path. Pass the bytes we already
+                    # downloaded through http_download() so the incomplete-chain
+                    # fallback for g7.cdnchinhphu.vn applies (issue #1535).
+                    # force=True because the corpus landed metadata-only: the
+                    # skip-if-already-in-Neon guard would otherwise be a no-op
+                    # today but suppress re-extraction once rows carry text.
+                    text = extract_pdf_markdown(
+                        "VN/CongBao",
+                        source_id,
+                        pdf_bytes=content,
+                        table="legislation",
+                        force=True,
+                    )
+                    return text.strip() if text and len(text) > 50 else None
                 except Exception as e:
                     logger.warning(f"PDF extraction failed: {e}")
 
@@ -316,7 +385,10 @@ class CongBaoFetcher:
         time.sleep(self.delay)
 
         # Download full text
-        text = self.fetch_full_text(page_data["docx_url"], page_data["pdf_url"])
+        record_id = f"VN-CongBao-{doc_id}"
+        text = self.fetch_full_text(
+            page_data["docx_url"], page_data["pdf_url"], record_id
+        )
         if not text:
             logger.warning(f"No full text for doc_id={doc_id}: {title[:60]}")
             return None
@@ -325,7 +397,7 @@ class CongBaoFetcher:
         doc_type = classify_doc_type(title, slug)
 
         return {
-            "_id": f"VN-CongBao-{doc_id}",
+            "_id": record_id,
             "_source": "VN/CongBao",
             "_type": "legislation",
             "_fetched_at": datetime.now(timezone.utc).isoformat(),
@@ -344,16 +416,42 @@ class CongBaoFetcher:
         return raw
 
     def fetch_all(self) -> Iterator[Dict[str, Any]]:
-        """Yield all documents from congbao.chinhphu.vn."""
-        total_pages = self.get_total_pages()
-        logger.info(f"Total listing pages: {total_pages}")
+        """Yield all documents from congbao.chinhphu.vn.
 
-        for page in range(1, total_pages + 1):
-            logger.info(f"Listing page {page}/{total_pages}")
+        Discovery does not depend solely on the ``totalPageSodo`` token: even
+        when it is missing (markup change) we still walk the paginated
+        ``trang-{page}.htm`` listing until a page comes back empty. The token,
+        when present, only supplies an upper bound / progress denominator.
+        """
+        total_pages = self.get_total_pages()
+        if total_pages < 0:
+            # Listing root unreachable — surface it loudly rather than silently
+            # yielding nothing (which the fleet reads as "0 records, complete").
+            raise RuntimeError(
+                "congbao.chinhphu.vn listing root is unreachable "
+                "(datacenter-IP block?) — aborting so the run fails loud "
+                "instead of reporting a false-empty corpus"
+            )
+
+        # Cap: known total when the token parsed, otherwise a generous ceiling.
+        # The loop stops early on the first empty page regardless.
+        page_cap = total_pages if total_pages > 0 else 5000
+        logger.info(f"Total listing pages: {total_pages} (walking up to {page_cap})")
+
+        empty_streak = 0
+        for page in range(1, page_cap + 1):
+            logger.info(f"Listing page {page}/{page_cap}")
             items = self.list_documents(page)
             if not items:
-                logger.warning(f"Empty page {page}, stopping")
-                break
+                # Tolerate a single transient empty page, stop on two in a row.
+                empty_streak += 1
+                logger.warning(f"Empty page {page} (streak {empty_streak})")
+                if empty_streak >= 2:
+                    logger.info("Two consecutive empty pages — end of listing")
+                    break
+                time.sleep(self.delay)
+                continue
+            empty_streak = 0
 
             for item in items:
                 doc = self.fetch_document(item)
@@ -424,6 +522,11 @@ def bootstrap_sample(sample_dir: Path, count: int = 15):
 
 
 if __name__ == "__main__":
+    # `bootstrap-fast` is the fleet runner's entry point; this CLI
+    # dispatches on the literal command name, so alias it onto the full
+    # bootstrap rather than exiting 1 (VPS CLI mismatch, issue #602).
+    if len(sys.argv) > 1 and sys.argv[1] == "bootstrap-fast":
+        sys.argv[1] = "bootstrap"
     source_dir = Path(__file__).parent
     sample_dir = source_dir / "sample"
 

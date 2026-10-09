@@ -53,6 +53,12 @@ API_BASE = "https://data.bka.gv.at/ris/api/v2.6"
 LEGISLATION_APPS = ["BrKons"]
 CASE_LAW_APPS = ["Justiz", "Vfgh", "Vwgh", "Bvwg", "Lvwg"]
 
+# Checkpoint file for resuming the full bootstrap across sessions.
+# The full corpus (500K+ records) exceeds the fleet's 100-hour wall, so a
+# single run cannot finish. This lets successive runs continue where the last
+# one stopped instead of re-scraping from scratch (issue #1087).
+CHECKPOINT_FILE = Path(__file__).parent / "checkpoint.json"
+
 # Page size values accepted by the API
 PAGE_SIZES = {10: "Ten", 20: "Twenty", 50: "Fifty", 100: "OneHundred"}
 
@@ -77,6 +83,38 @@ class RISScraper(BaseScraper):
             timeout=60,
         )
 
+        # Full bootstrap uses checkpoint/resume; sample/update disable it.
+        self._use_checkpoint = True
+
+    # -- Checkpoint helpers -------------------------------------------------
+
+    def _load_checkpoint(self) -> dict:
+        """Load the resume checkpoint if present, else a fresh one."""
+        if CHECKPOINT_FILE.exists():
+            try:
+                with open(CHECKPOINT_FILE, "r") as f:
+                    data = json.load(f)
+                    data.setdefault("completed_units", [])
+                    data.setdefault("current_page", {})
+                    return data
+            except json.JSONDecodeError:
+                logger.warning("Invalid checkpoint file, starting fresh")
+        return {"completed_units": [], "current_page": {}}
+
+    def _save_checkpoint(self, checkpoint: dict):
+        """Persist the resume checkpoint."""
+        try:
+            with open(CHECKPOINT_FILE, "w") as f:
+                json.dump(checkpoint, f, indent=2)
+        except OSError as e:
+            logger.warning(f"Could not write checkpoint: {e}")
+
+    def _clear_checkpoint(self):
+        """Remove the checkpoint (call once the full corpus is done)."""
+        if CHECKPOINT_FILE.exists():
+            CHECKPOINT_FILE.unlink()
+            logger.info("Checkpoint cleared -- full corpus complete")
+
     # -- API helpers --------------------------------------------------------
 
     def _paginate(
@@ -85,13 +123,19 @@ class RISScraper(BaseScraper):
         applikation,
         extra_params=None,
         max_pages=None,
+        start_page=1,
+        on_page_complete=None,
     ):
         """
         Generator that paginates through an RIS API endpoint.
 
         Yields individual document references (raw dicts from the API).
+
+        start_page: 1-based page to begin at (used for checkpoint resume).
+        on_page_complete: optional callback(next_page) invoked after each page
+            is fully yielded, so callers can persist resume progress.
         """
-        page = 1
+        page = start_page
         total_hits = None
 
         while True:
@@ -167,6 +211,10 @@ class RISScraper(BaseScraper):
                 return
 
             page += 1
+            # Record resume point: this page is fully yielded, next run
+            # for this unit should start at `page`.
+            if on_page_complete:
+                on_page_complete(page)
             logger.info(
                 f"  Page {page} ({fetched_so_far}/{total_hits} fetched)"
             )
@@ -332,37 +380,43 @@ class RISScraper(BaseScraper):
                             section_heading = heading
                             break  # Use the first paragraph-level heading
 
-                # Extract text from all <absatz> (paragraph) elements
-                for absatz in root.iter(f"{ns}absatz" if ns else "absatz"):
-                    text = absatz.text or ""
-                    # Also get text from child elements
-                    for child in absatz.iter():
-                        if child.text:
-                            text += " " + child.text
-                        if child.tail:
-                            text += " " + child.tail
-                    text = text.strip()
-                    if text:
-                        text_parts.append(text)
+                # Header/footer boilerplate ("Bundesrecht konsolidiert",
+                # "www.ris.bka.gv.at Seite ...") lives inside <kzinhalt>/<fzinhalt>.
+                # Collect those element ids so we can skip them entirely.
+                skip_ids = set()
+                for boiler_tag in ("kzinhalt", "fzinhalt"):
+                    for boiler in root.iter(f"{ns}{boiler_tag}" if ns else boiler_tag):
+                        for descendant in boiler.iter():
+                            skip_ids.add(id(descendant))
 
-                # If no paragraphs found with namespace, try without
-                if not text_parts and ns:
-                    for absatz in root.iter("absatz"):
-                        text = absatz.text or ""
-                        for child in absatz.iter():
-                            if child.text:
-                                text += " " + child.text
-                            if child.tail:
-                                text += " " + child.tail
-                        text = text.strip()
+                # Extract text from all block-level content elements in document
+                # order. Crucially this includes <listelem> (enumerated list items
+                # under <liste>/<aufzaehlung>) and <schlussteil>, which are siblings
+                # of <absatz> and were previously dropped (issue #1194). These block
+                # tags do not nest within one another, so itertext() on each yields
+                # non-overlapping text with no duplication.
+                content_tags = {"absatz", "listelem", "schlussteil"}
+                for elem in root.iter():
+                    if id(elem) in skip_ids:
+                        continue
+                    tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                    if tag in content_tags:
+                        text = "".join(elem.itertext()).strip()
+                        # The enumeration marker <symbol>1.</symbol> often abuts the
+                        # item text with no whitespace ("1.die Firma") — insert a
+                        # space after the leading marker for readability.
+                        if tag == "listelem":
+                            text = re.sub(r"^(\d+[a-z]?\.)(?=\S)", r"\1 ", text)
                         if text:
                             text_parts.append(text)
 
-                # If no paragraphs, try other text-containing elements
+                # Last-resort fallback for documents without the above structure
                 if not text_parts:
                     for elem in root.iter():
+                        if id(elem) in skip_ids:
+                            continue
                         tag = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
-                        if tag in ["titel", "untertitel", "absatz", "text", "betreff"]:
+                        if tag in ["titel", "untertitel", "text", "betreff"]:
                             text = "".join(elem.itertext()).strip()
                             if text:
                                 text_parts.append(text)
@@ -418,19 +472,64 @@ class RISScraper(BaseScraper):
         Yield all documents from RIS: federal legislation + case law.
 
         WARNING: Full fetch is 500K+ records. Use sample mode for testing.
-        For full bootstrap, consider running off-hours and with --max-pages.
+
+        The full corpus exceeds the fleet's 100-hour wall, so this method
+        checkpoints its progress (issue #1087): completed (endpoint, app)
+        units are skipped with NO network calls on resume, and the in-progress
+        unit restarts at the last page it reached. Re-fetching a partial page
+        is safe -- the loader dedups on _id. Set self._use_checkpoint = False
+        to force a clean full run.
         """
-        # Federal legislation (BrKons)
-        for app in LEGISLATION_APPS:
-            logger.info(f"Fetching legislation: {app}")
-            for doc in self._paginate("/Bundesrecht", app):
+        use_checkpoint = self._use_checkpoint
+        checkpoint = self._load_checkpoint() if use_checkpoint else {
+            "completed_units": [], "current_page": {}
+        }
+        completed = set(checkpoint.get("completed_units", []))
+        if completed:
+            logger.info(
+                f"Resuming AT/RIS: {len(completed)} unit(s) already complete"
+            )
+
+        # Ordered work list: legislation first, then case law.
+        work_units = [("/Bundesrecht", app) for app in LEGISLATION_APPS]
+        work_units += [("/Judikatur", app) for app in CASE_LAW_APPS]
+
+        for endpoint, app in work_units:
+            unit_key = f"{endpoint}|{app}"
+            if unit_key in completed:
+                logger.info(f"Skipping completed unit {unit_key}")
+                continue
+
+            start_page = int(
+                checkpoint.get("current_page", {}).get(unit_key, 1)
+            )
+            if start_page > 1:
+                logger.info(f"Resuming {unit_key} at page {start_page}")
+            else:
+                logger.info(f"Fetching {unit_key}")
+
+            def _record_page(next_page, _k=unit_key):
+                if use_checkpoint:
+                    checkpoint.setdefault("current_page", {})[_k] = next_page
+                    self._save_checkpoint(checkpoint)
+
+            for doc in self._paginate(
+                endpoint, app,
+                start_page=start_page,
+                on_page_complete=_record_page,
+            ):
                 yield doc
 
-        # Case law (Justiz, VfGH, VwGH, BVwG, LVwG)
-        for app in CASE_LAW_APPS:
-            logger.info(f"Fetching case law: {app}")
-            for doc in self._paginate("/Judikatur", app):
-                yield doc
+            # Unit finished: mark complete and drop its page cursor.
+            if use_checkpoint:
+                completed.add(unit_key)
+                checkpoint["completed_units"] = sorted(completed)
+                checkpoint.get("current_page", {}).pop(unit_key, None)
+                self._save_checkpoint(checkpoint)
+
+        # All units done -- clear the checkpoint so a later refresh starts clean.
+        if use_checkpoint:
+            self._clear_checkpoint()
 
     def fetch_updates(self, since: datetime) -> Generator[dict, None, None]:
         """
@@ -613,6 +712,8 @@ def main():
 
     elif args.command == "bootstrap":
         if args.sample:
+            # Sampling stops early; don't leave a partial resume checkpoint.
+            scraper._use_checkpoint = False
             stats = scraper.run_sample(n=args.sample_size)
             print(
                 f"\nSample complete: "

@@ -37,7 +37,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import requests
-from common.base_scraper import BaseScraper
+from common.base_scraper import BaseScraper, as_date_str
 
 logging.basicConfig(
     level=logging.INFO,
@@ -301,10 +301,20 @@ class PravoByScraper(BaseScraper):
         """
         logger.info(f"Fetching code: {name_ru} ({regnum})")
 
-        # Try etalonline.by first (primary -- works from VPS/datacenter IPs)
+        # Try etalonline.by first (primary -- works from VPS/datacenter IPs).
+        # Code pages are large (100K-1M chars) and the host is bandwidth
+        # throttled, so a single fetch can time out transiently -- retry a few
+        # times before giving up (this is what dropped Hk0900071 to 25/26 on the
+        # VPS, issue #1179).
         etalon_url = f"{ETALON_BASE}{ETALON_DOC_ENDPOINT}{regnum}"
-        html_content = self._try_fetch_document(etalon_url, regnum)
         source_url = etalon_url
+        html_content = None
+        for attempt in range(3):
+            html_content = self._try_fetch_document(etalon_url, regnum)
+            if html_content:
+                break
+            if attempt < 2:
+                logger.info(f"Retry {attempt + 1}/2 for {regnum} on etalonline.by...")
 
         # Fall back to pravo.by if etalonline.by failed
         if not html_content:
@@ -367,6 +377,8 @@ class PravoByScraper(BaseScraper):
         For codes, we refetch all since they change infrequently
         but are always current consolidated versions.
         """
+        # `update()` passes a datetime; this body treats `since` as a date string (#1512).
+        since = as_date_str(since)
         logger.info(f"Checking for code updates since {since}...")
         # Codes are consolidated versions, so we just refetch all
         yield from self.fetch_all()
@@ -498,4 +510,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # `bootstrap-fast` is the fleet runner's entry point; this CLI
+    # dispatches on the literal command name, so alias it onto the full
+    # bootstrap rather than exiting 1 (VPS CLI mismatch, issue #602).
+    if len(sys.argv) > 1 and sys.argv[1] == "bootstrap-fast":
+        sys.argv[1] = "bootstrap"
     main()

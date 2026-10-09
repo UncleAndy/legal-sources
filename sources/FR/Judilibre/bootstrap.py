@@ -186,6 +186,64 @@ def clean_text(text: str) -> str:
     return text
 
 
+# Judilibre spans four court levels under one source. The API reports the level
+# either as a short code (search results: "cc") or as a display name (export:
+# "Cour de cassation"), so both forms are accepted here.
+JURISDICTION_COURTS = {
+    "cc": ("Cour de cassation", 1),
+    "ca": ("Cour d'appel", 2),
+    "tj": ("Tribunal judiciaire", 3),
+    "tcom": ("Tribunal de commerce", 3),
+}
+JURISDICTION_ALIASES = {
+    "cour de cassation": "cc",
+    "cour d'appel": "ca",
+    "cour d’appel": "ca",
+    "tribunal judiciaire": "tj",
+    "tribunal de commerce": "tcom",
+}
+
+CHAMBERS = {
+    "civ1": "Première chambre civile",
+    "civ2": "Deuxième chambre civile",
+    "civ3": "Troisième chambre civile",
+    "comm": "Chambre commerciale",
+    "soc": "Chambre sociale",
+    "cr": "Chambre criminelle",
+    "mixte": "Chambre mixte",
+    "pl": "Assemblée plénière",
+    "ordo": "Ordonnance",
+    "creun": "Chambres réunies",
+    "allciv": "Toutes chambres civiles",
+}
+
+
+def _jurisdiction_code(value: Optional[str]) -> Optional[str]:
+    """Map a raw jurisdiction value to its short code, accepting either form."""
+    if not value:
+        return None
+    raw = str(value).strip()
+    if raw.lower() in JURISDICTION_COURTS:
+        return raw.lower()
+    return JURISDICTION_ALIASES.get(raw.lower())
+
+
+def _case_number(value) -> Optional[str]:
+    """Render the decision number(s) as a string.
+
+    A decision joining several pourvois arrives as a list. Joining it without a
+    separator produced unusable values like ``18-25.151182515218251531825154``,
+    so the parts are kept comma-separated.
+    """
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        parts = [str(v).strip() for v in value if v is not None and str(v).strip()]
+        return ", ".join(parts) or None
+    text = str(value).strip()
+    return text or None
+
+
 def normalize(raw: Dict) -> Dict:
     """Transform raw Judilibre data into normalized schema."""
     doc_id = raw.get("id", "")
@@ -200,15 +258,26 @@ def normalize(raw: Dict) -> Dict:
                 break
     text = clean_text(text)
 
+    code = _jurisdiction_code(raw.get("jurisdiction"))
+    court, court_tier = JURISDICTION_COURTS.get(code, (None, None))
+    if not court and raw.get("jurisdiction"):
+        # Unrecognised level: keep the API's own label rather than dropping it,
+        # and leave the tier unset instead of guessing.
+        court = str(raw["jurisdiction"]).strip()
+    jurisdiction = court
+    chamber_code = (raw.get("chamber") or "").strip() or None
+    chamber = CHAMBERS.get(chamber_code.lower(), chamber_code) if chamber_code else None
+    case_number = _case_number(raw.get("number"))
+
     title_parts = []
-    if raw.get("jurisdiction"):
-        title_parts.append(raw["jurisdiction"])
-    if raw.get("chamber"):
-        title_parts.append(raw["chamber"])
+    if jurisdiction:
+        title_parts.append(jurisdiction)
+    if chamber:
+        title_parts.append(chamber)
     if raw.get("decision_date"):
         title_parts.append(raw["decision_date"])
-    if raw.get("number"):
-        title_parts.append(f"n\u00b0 {raw['number']}")
+    if case_number:
+        title_parts.append(f"n\u00b0 {case_number}")
     title = " - ".join(title_parts) if title_parts else f"Decision {doc_id}"
 
     url = f"https://www.courdecassation.fr/decision/{doc_id}" if doc_id else ""
@@ -223,9 +292,17 @@ def normalize(raw: Dict) -> Dict:
         "date": raw.get("decision_date"),
         "url": url,
         "ecli": ecli,
-        "jurisdiction": raw.get("jurisdiction"),
-        "chamber": raw.get("chamber"),
-        "number": raw.get("number"),
+        # Judilibre mixes four court levels, so court and tier are per record,
+        # not per source — a static source-level tier tags 761K first-instance
+        # and appellate decisions as apex-court decisions (#1424).
+        "court": court,
+        "court_tier": court_tier,
+        "jurisdiction": jurisdiction,
+        "jurisdiction_code": code,
+        "chamber": chamber,
+        "chamber_code": chamber_code,
+        "case_number": case_number,
+        "number": case_number,  # retained: the pre-#1424 key name
         "solution": raw.get("solution"),
         "publication": raw.get("publication"),
         "themes": raw.get("themes", []),
@@ -234,8 +311,27 @@ def normalize(raw: Dict) -> Dict:
     }
 
 
-def fetch_sample(api: JudilibreAPI, count: int = 15) -> List[Dict]:
+def _build_api_from_env() -> JudilibreAPI:
+    """Construct a JudilibreAPI from environment credentials.
+
+    Used when a fetch function is invoked without an explicit ``api`` object —
+    e.g. by the VPS generic bootstrap runner, which calls ``fetch_all()`` with no
+    args (issue #1065). Mirrors the credential handling in main().
+    """
+    api_key = os.environ.get("JUDILIBRE_API_KEY")
+    environment = os.environ.get("JUDILIBRE_ENVIRONMENT", "production")
+    if not api_key:
+        raise RuntimeError(
+            "Missing API key: set JUDILIBRE_API_KEY (PISTE app KeyId) in the "
+            "environment. See .env.template."
+        )
+    return JudilibreAPI(api_key, environment)
+
+
+def fetch_sample(api: Optional[JudilibreAPI] = None, count: int = 15) -> List[Dict]:
     """Fetch a sample of records with full text."""
+    if api is None:
+        api = _build_api_from_env()
     print(f"Searching for recent decisions...")
     records = []
     page = 0
@@ -305,8 +401,14 @@ def clear_checkpoint():
         print("Checkpoint cleared")
 
 
-def fetch_all(api: JudilibreAPI, days: int = 30) -> Generator[Dict, None, None]:
-    """Fetch all decisions from the last N days, using weekly windows per jurisdiction."""
+def fetch_all(api: Optional[JudilibreAPI] = None, days: int = 30) -> Generator[Dict, None, None]:
+    """Fetch all decisions from the last N days, using weekly windows per jurisdiction.
+
+    ``api`` is optional so the generic bootstrap runner can call ``fetch_all()`` with
+    no arguments (issue #1065); it is self-constructed from env credentials when None.
+    """
+    if api is None:
+        api = _build_api_from_env()
     now = datetime.now()
     start = now - timedelta(days=days)
     print(f"Scanning decisions from {start.strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')} "
@@ -370,12 +472,17 @@ def _scan_window(api: JudilibreAPI, date_start: str, date_end: str,
               f"(total {len(seen_ids)} unique, was {wide_count} from wide window)")
 
 
-def fetch_full_archive(api: JudilibreAPI, use_checkpoint: bool = True) -> Generator[Dict, None, None]:
+def fetch_full_archive(api: Optional[JudilibreAPI] = None, use_checkpoint: bool = True) -> Generator[Dict, None, None]:
     """
     Fetch all decisions from 2010 to present, per jurisdiction, using weekly
     date windows to avoid PISTE gateway result caps (~10K per query).
     Supports checkpoint/resume for this long-running operation.
+
+    ``api`` is optional (self-constructed from env when None) for parity with the
+    generic runner contract (issue #1065).
     """
+    if api is None:
+        api = _build_api_from_env()
     if use_checkpoint:
         checkpoint = load_checkpoint()
         start_jurisdiction = checkpoint.get("current_jurisdiction") or JURISDICTIONS[0]
@@ -453,8 +560,12 @@ def fetch_full_archive(api: JudilibreAPI, use_checkpoint: bool = True) -> Genera
             print(f"  {j}: {c} records")
 
 
-def fetch_updates(api: JudilibreAPI, since: datetime) -> Generator[Dict, None, None]:
+def fetch_updates(api: Optional[JudilibreAPI] = None, since: datetime = None) -> Generator[Dict, None, None]:
     """Fetch updates since a given date, using weekly windows per jurisdiction."""
+    if api is None:
+        api = _build_api_from_env()
+    if since is None:
+        since = datetime.now() - timedelta(days=1)
     now = datetime.now()
     print(f"Scanning updates from {since.strftime('%Y-%m-%d')} to {now.strftime('%Y-%m-%d')} "
           f"(all jurisdictions, {WINDOW_DAYS}-day windows)...")
@@ -527,6 +638,20 @@ def main():
     bootstrap_parser.add_argument("--no-checkpoint", action="store_true", help="Disable checkpoint")
     bootstrap_parser.add_argument("--clear-checkpoint", action="store_true", help="Clear checkpoint first")
 
+    # The fleet wrapper invokes `bootstrap-fast`; argparse rejected it, so the
+    # wrapper fell back to re-ingesting sample/ and the corpus went stale. Same
+    # class as the FR/CASS fix for #1363.
+    fast_parser = subparsers.add_parser(
+        "bootstrap-fast", help="Alias the fleet calls; always runs the full fetch"
+    )
+    fast_parser.add_argument("--sample", action="store_true", help=argparse.SUPPRESS)
+    fast_parser.add_argument("--full", action="store_true", help=argparse.SUPPRESS)
+    fast_parser.add_argument("--recent", action="store_true", help=argparse.SUPPRESS)
+    fast_parser.add_argument("--count", type=int, default=15, help=argparse.SUPPRESS)
+    fast_parser.add_argument("--days", type=int, default=30, help=argparse.SUPPRESS)
+    fast_parser.add_argument("--no-checkpoint", action="store_true", help="Disable checkpoint")
+    fast_parser.add_argument("--clear-checkpoint", action="store_true", help="Clear checkpoint first")
+
     updates_parser = subparsers.add_parser("updates", help="Fetch updates")
     updates_parser.add_argument("--since", required=True, help="Date to fetch from (YYYY-MM-DD)")
 
@@ -568,9 +693,16 @@ def main():
 
     api = JudilibreAPI(api_key, environment)
 
-    if args.command == "bootstrap":
+    if args.command in ("bootstrap", "bootstrap-fast"):
         if args.clear_checkpoint:
             clear_checkpoint()
+
+        # `bootstrap-fast` always means the full archive, and a bare `bootstrap`
+        # used to fall through to the "No action specified" exit, which the
+        # fleet wrapper read as a failed run.
+        if args.command == "bootstrap-fast" or not (args.sample or args.full or args.recent):
+            args.sample = False
+            args.full = True
 
         if args.sample:
             print(f"Fetching {args.count} sample records from Judilibre ({environment})...")

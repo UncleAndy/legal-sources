@@ -11,22 +11,242 @@ Handles:
 """
 
 import os
+import ast
+import sys
 import json
 import time
 import yaml
+import inspect
 import hashlib
 import logging
+import textwrap
 from abc import ABC, abstractmethod
 from pathlib import Path
-from datetime import datetime, timezone
-from typing import Optional, Generator
+from datetime import datetime, date, timezone
+from typing import List, Optional, Generator, Union
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .rate_limiter import RateLimiter, AdaptiveRateLimiter
-from .storage import StorageManager
+from .storage import StorageManager, scrub_surrogates
 from .validators import SchemaValidator
 
 logger = logging.getLogger("legal-data-hunter")
+
+
+def _is_trivial_stmt(node: ast.stmt) -> bool:
+    """True if `node` cannot contribute a document to a `fetch_updates` generator.
+
+    Covers the shapes a stub uses to satisfy the abstract method without doing
+    any work: a docstring, a log/print line, `pass`, a bare `return`, a bare
+    `yield`, `yield from <empty literal>`, `return <empty literal>`, and
+    `raise NotImplementedError`.
+    """
+    # Docstring / bare constant
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+        return True
+    if isinstance(node, ast.Pass):
+        return True
+
+    def _is_empty_literal(v) -> bool:
+        if v is None:  # bare `return` / bare `yield`
+            return True
+        if isinstance(v, ast.Constant) and v.value is None:  # `return None`
+            return True
+        if isinstance(v, (ast.List, ast.Tuple, ast.Set)) and not v.elts:
+            return True
+        if isinstance(v, ast.Dict) and not v.keys:
+            return True
+        # iter([]) / list() / tuple() / dict() / iter(())
+        if isinstance(v, ast.Call) and isinstance(v.func, ast.Name):
+            if v.func.id in {"list", "tuple", "dict", "set"} and not v.args:
+                return True
+            if v.func.id == "iter" and len(v.args) == 1 and _is_empty_literal(v.args[0]):
+                return True
+        return False
+
+    # `return`, `return None`, `return []`, `return iter([])`
+    if isinstance(node, ast.Return):
+        return _is_empty_literal(node.value)
+
+    # `yield`, `yield None`, `yield from []`
+    if isinstance(node, ast.Expr) and isinstance(node.value, (ast.Yield, ast.YieldFrom)):
+        return _is_empty_literal(node.value.value)
+
+    # `raise NotImplementedError(...)` — no incremental path, but a loud one
+    if isinstance(node, ast.Raise):
+        exc = node.exc
+        if isinstance(exc, ast.Call):
+            exc = exc.func
+        if isinstance(exc, ast.Name) and exc.id == "NotImplementedError":
+            return True
+        if isinstance(exc, ast.Attribute) and exc.attr == "NotImplementedError":
+            return True
+        return False
+
+    # A logging / print call: `logger.warning(...)`, `self.logger.info(...)`, `print(...)`
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+        func = node.value.func
+        if isinstance(func, ast.Name) and func.id == "print":
+            return True
+        if isinstance(func, ast.Attribute) and func.attr in {
+            "debug", "info", "warning", "warn", "error", "critical", "exception", "log"
+        }:
+            return True
+        return False
+
+    return False
+
+
+#: `fetch_updates` has no body that could yield a document — the refresh
+#: reports 0 records and the caller falls back to a full re-crawl.
+INCR_STUB = "stub"
+#: `fetch_updates` runs, but never reads its `since` argument, so it walks the
+#: whole corpus and the refresh costs exactly as much as a full bootstrap.
+INCR_IGNORES_SINCE = "ignores_since"
+#: `fetch_updates` reads `since` and can genuinely narrow the crawl.
+INCR_OK = "incremental"
+#: `fetch_updates` ignores `since`, but narrows against its own persisted state
+#: (a seen-ID checkpoint, a resume marker, a stored high-water mark). Functionally
+#: incremental: some sources have no date filter, no date column and no
+#: recency ordering to compare a cutoff against, so a checkpoint is the only
+#: available comparator rather than a shortcut around one.
+INCR_CHECKPOINT = "checkpoint"
+#: `fetch_updates` ignores `since` and narrows on whether the upstream artefact
+#: itself moved — the bulk dump's ETag/Last-Modified/size stamp, then a per-record
+#: content hash for the ones that did. Also functionally incremental: where the
+#: corpus carries no modified-date facet, availability is the only honest
+#: comparator, and a `since` built from a *crawl* time would not narrow anything
+#: even if the body read it.
+INCR_AVAILABILITY = "availability"
+#: Source unreadable (C extension, exec'd module, stripped .pyc) or abstract.
+INCR_UNKNOWN = "unknown"
+
+#: The two classifications that mean "a refresh slot buys a full re-crawl".
+INCR_BROKEN = (INCR_STUB, INCR_IGNORES_SINCE)
+#: Classifications that narrow the refresh, by any of the three mechanisms.
+INCR_WORKING = (INCR_OK, INCR_CHECKPOINT, INCR_AVAILABILITY)
+
+#: Class attribute a scraper sets to declare the comparator its `fetch_updates`
+#: narrows on when `since` is unusable. The name heuristics below cannot see
+#: intent: `_load_json("dump_state.json")` and an in-run `seen_urls` dedup set
+#: look alike from the AST, and widening the markers far enough to catch the
+#: first sweeps in the second. A declaration is checked before them, so a source
+#: that has actually been repaired says so instead of hoping a regex notices.
+_DECLARED_COMPARATORS = {
+    "availability": INCR_AVAILABILITY,
+    "checkpoint": INCR_CHECKPOINT,
+}
+
+#: Attribute/function name fragments that indicate a body is consulting its own
+#: persisted state. Deliberately narrow: matching something like "last" or "state"
+#: on its own would sweep in unrelated locals and turn the classifier into a
+#: rubber stamp.
+_CHECKPOINT_MARKERS = (
+    "checkpoint", "load_seen", "save_seen", "seen_id", "seen_key",
+    "last_max", "high_water", "resume_from", "_resume",
+)
+
+
+def classify_fetch_updates(cls) -> str:
+    """Statically classify a scraper's incremental-refresh support.
+
+    Returns one of `INCR_STUB`, `INCR_IGNORES_SINCE`, `INCR_OK`,
+    `INCR_CHECKPOINT`, `INCR_AVAILABILITY` or `INCR_UNKNOWN`.
+
+    Why this exists: `BaseScraper.update()` calls `fetch_updates(since)`. A stub
+    that yields nothing reports zero records, and a body that never reads
+    `since` walks the entire corpus — either way the refresh costs a full
+    re-crawl of an already-ingested corpus. From the fleet's side both are
+    indistinguishable from a slow or blocked host, so the wasted slot gets
+    reported as a sick source (#1502).
+    """
+    fn = getattr(cls, "fetch_updates", None)
+    if fn is None:
+        return INCR_UNKNOWN
+    fn = inspect.unwrap(fn)
+    # An abstract declaration on the base class is not a source's problem.
+    if getattr(fn, "__isabstractmethod__", False):
+        return INCR_UNKNOWN
+    try:
+        tree = ast.parse(textwrap.dedent(inspect.getsource(fn)))
+    except (OSError, TypeError, SyntaxError, IndentationError):
+        return INCR_UNKNOWN
+
+    node = tree.body[0] if tree.body else None
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return INCR_UNKNOWN
+
+    if all(_is_trivial_stmt(stmt) for stmt in node.body):
+        return INCR_STUB
+
+    named = [a.arg for a in node.args.args + node.args.kwonlyargs if a.arg != "self"]
+    if not named:
+        # `*args`/`**kwargs` signature — can't attribute the cutoff statically.
+        return INCR_UNKNOWN
+    since_name = named[0]
+    reads_since = any(
+        isinstance(n, ast.Name) and n.id == since_name for n in ast.walk(node)
+    )
+    if reads_since:
+        return INCR_OK
+
+    declared = getattr(cls, "incremental_comparator", None)
+    if isinstance(declared, str) and declared.lower() in _DECLARED_COMPARATORS:
+        return _DECLARED_COMPARATORS[declared.lower()]
+
+    return INCR_CHECKPOINT if _narrows_via_checkpoint(node) else INCR_IGNORES_SINCE
+
+
+def _narrows_via_checkpoint(node) -> bool:
+    """True if a `fetch_updates` body consults its own persisted state.
+
+    Reading `since` is not the only way to narrow a refresh. Where a source has
+    no date filter, no date column and no recency ordering, a seen-ID checkpoint
+    is the only comparator available — the body ignores `since` because there is
+    nothing to compare it against, not because it is a no-op. Judging those on
+    the `since` test alone reported working scrapers as broken (#1502).
+    """
+    for sub in ast.walk(node):
+        name = None
+        if isinstance(sub, ast.Attribute):
+            name = sub.attr
+        elif isinstance(sub, ast.Name):
+            name = sub.id
+        if name and any(m in name.lower() for m in _CHECKPOINT_MARKERS):
+            return True
+    return False
+
+
+def has_noop_fetch_updates(cls) -> Optional[bool]:
+    """True if `cls` has no usable incremental path, None if undeterminable."""
+    kind = classify_fetch_updates(cls)
+    if kind == INCR_UNKNOWN:
+        return None
+    return kind in INCR_BROKEN
+
+
+def as_date_str(since: Union[str, datetime, date, None]) -> str:
+    """Reduce a `fetch_updates(since=...)` argument to a plain YYYY-MM-DD string.
+
+    `update()` always passes a `datetime`, but scrapers overwhelmingly want a
+    date string — either to put in a query parameter or to compare against an
+    ISO date already on the record. Both go wrong quietly when handed a
+    datetime: `str(datetime)` is "2026-06-11 00:00:00", which upstream APIs
+    reject, and comparing a str to a datetime raises TypeError. Either way the
+    refresh ends with zero records and no obvious cause (#1441). Use this to
+    accept whatever the caller passes.
+    """
+    if since is None:
+        return ""
+    if isinstance(since, datetime):
+        return since.date().isoformat()
+    if isinstance(since, date):
+        return since.isoformat()
+    text = str(since).strip()
+    if not text:
+        return ""
+    # "2026-06-11T00:00:00Z" / "2026-06-11 00:00:00" -> "2026-06-11"
+    return text.replace("T", " ").split(" ")[0]
 
 
 class BaseScraper(ABC):
@@ -41,6 +261,55 @@ class BaseScraper(ABC):
     The base class handles everything else: config, auth, rate limiting,
     deduplication, storage, and status tracking.
     """
+
+    # Captured at subclass-definition time; the resolved path to the module
+    # (bootstrap.py) that defines each concrete scraper. See __init_subclass__.
+    _module_file: Optional[str] = None
+
+    # One-shot guard so a broken data_model.dedup_key warns once per run rather
+    # than once per record. Class-level default so subclasses that build their
+    # own __init__ still get it. See _dedup_key / issue #1596.
+    _dedup_key_warned: bool = False
+
+    def __init_subclass__(cls, **kwargs):
+        """Record the defining module's file path when a scraper subclass is
+        created.
+
+        ``inspect.getfile(type(self))`` fails (raises ``TypeError: is a
+        built-in class``) when the subclass module is loaded via
+        ``importlib.util.exec_module`` **without** being registered in
+        ``sys.modules`` — which is exactly what the fleet's bootstrap-fast
+        wrapper does when it instantiates ``ScraperClass()`` with no args.
+        When that happens, source_dir silently fell back to ``os.getcwd()``
+        (a temp working dir the fleet cleans up), so every fetched record was
+        written outside the source tree and lost before ingest (issue #1171).
+
+        At class-definition time the module globals still carry ``__file__``,
+        so capture it here from the class-statement frame — robust regardless
+        of how the module was later (un)registered.
+        """
+        super().__init_subclass__(**kwargs)
+        try:
+            mod = sys.modules.get(cls.__module__)
+            module_file = getattr(mod, "__file__", None)
+            if not module_file:
+                # Module isn't registered in sys.modules (importlib exec_module).
+                # Walk the call stack for the frame that actually defines this
+                # class — the ABCMeta machinery inserts an abc.py frame between
+                # __init_subclass__ and the module body, so f_back alone is
+                # wrong. Match on the module name to find the real defining frame.
+                import inspect
+                frame = inspect.currentframe()
+                while frame is not None:
+                    fg = frame.f_globals
+                    if fg.get("__name__") == cls.__module__ and fg.get("__file__"):
+                        module_file = fg["__file__"]
+                        break
+                    frame = frame.f_back
+            if module_file:
+                cls._module_file = str(Path(module_file).resolve())
+        except Exception:
+            pass
 
     def __init__(self, source_dir: Optional[str] = None):
         """
@@ -66,6 +335,10 @@ class BaseScraper(ABC):
         self.storage = StorageManager(self.source_dir / "data")
         self.validator = SchemaValidator(self.config.get("schema", {}))
         self._auth_headers = self._setup_auth()
+        # Listing pages / windows the crawl gave up on. A failed *listing*
+        # loses every document behind it, so unlike a per-document error it
+        # must not vanish into an exit-0 run (issues #1429, #1430).
+        self.coverage_gaps: List[dict] = []
 
     def _resolve_source_dir(self) -> str:
         """Resolve the source directory from the subclass's module file.
@@ -74,6 +347,12 @@ class BaseScraper(ABC):
         instantiates the scraper class by introspection). Falls back to the
         current working directory if the module file cannot be located.
         """
+        # Prefer the path captured at subclass-definition time — it survives
+        # importlib loads that never register the module in sys.modules, which
+        # is what breaks inspect.getfile below (see __init_subclass__, #1171).
+        if self._module_file:
+            return str(Path(self._module_file).resolve().parent)
+
         import inspect
 
         try:
@@ -99,14 +378,19 @@ class BaseScraper(ABC):
         """
         candidates = [self.source_dir / "config.yaml"]
 
-        import inspect
-        try:
-            module_dir = Path(inspect.getfile(type(self))).resolve().parent
+        module_dir = None
+        if self._module_file:
+            module_dir = Path(self._module_file).resolve().parent
+        else:
+            import inspect
+            try:
+                module_dir = Path(inspect.getfile(type(self))).resolve().parent
+            except (TypeError, OSError):
+                module_dir = None
+        if module_dir is not None:
             module_config = module_dir / "config.yaml"
             if module_config not in candidates:
                 candidates.append(module_config)
-        except (TypeError, OSError):
-            pass
 
         for config_path in candidates:
             if config_path.exists():
@@ -135,6 +419,43 @@ class BaseScraper(ABC):
             "last_error": None,
             "run_history": [],
         }
+
+    # ── Coverage gaps ─────────────────────────────────────────────────
+
+    def record_coverage_gap(self, unit: str, reason: str, **detail):
+        """Record a listing page or crawl window that could never be fetched.
+
+        A per-document failure costs one record; a failed *listing* costs every
+        document behind it. BE/MoniteurBelge dropped six full years of arrêtés
+        and still exited 0 with a clean summary (#1430); KG/ActSotKG skipped 348
+        listing pages the same way (#1429). Gaps recorded here are counted into
+        the run stats and persisted to status.yaml, so partial coverage is
+        visible without grepping the log.
+        """
+        gap = {"unit": str(unit), "reason": str(reason)}
+        gap.update(detail)
+        self.coverage_gaps.append(gap)
+        logger.error(f"COVERAGE GAP: {unit} — {reason}")
+
+    def clear_coverage_gap(self, unit: str):
+        """Drop a previously recorded gap after a later retry succeeded."""
+        self.coverage_gaps = [g for g in self.coverage_gaps if g["unit"] != str(unit)]
+
+    def _report_coverage_gaps(self, stats: dict):
+        """Fold recorded gaps into run stats + status.yaml with a loud summary."""
+        gaps = getattr(self, "coverage_gaps", [])
+        stats["coverage_gaps"] = len(gaps)
+        if not gaps:
+            self.status.pop("coverage_gaps", None)
+            return
+
+        stats["coverage_gap_detail"] = gaps[:200]
+        self.status["coverage_gaps"] = gaps[:200]
+        units = [g["unit"] for g in gaps]
+        shown = ", ".join(units[:20]) + (f" (+{len(units) - 20} more)" if len(units) > 20 else "")
+        logger.error(
+            f"COVERAGE INCOMPLETE: {len(gaps)} listing unit(s) never fetched — {shown}"
+        )
 
     def _save_status(self):
         """Persist status.yaml."""
@@ -211,14 +532,48 @@ class BaseScraper(ABC):
         """
         dedup_fields = self.config.get("data_model", {}).get("dedup_key", [])
         if not dedup_fields:
-            # Fallback: hash the entire record
-            return hashlib.sha256(json.dumps(record, sort_keys=True, default=str).encode()).hexdigest()
+            return self._hash_record(record)
 
         key_parts = []
+        any_value = False
         for field in dedup_fields:
             val = record.get(field, "")
+            if val is None:
+                val = ""
+            if val != "":
+                any_value = True
             key_parts.append(str(val))
+
+        if not any_value:
+            # Every configured dedup field is missing or empty on this record.
+            # The naive join would hand *every* record the same key (""), which
+            # under append_only writes exactly one batch_size worth of records
+            # and silently skips the rest — the 100-row cap of issue #1596.
+            # This is nearly always a config/normalize mismatch: normalize()
+            # renamed the source's id field to `_id` but config.yaml still names
+            # the raw field. Fall back to something unique and say so loudly.
+            if not self._dedup_key_warned:
+                logger.warning(
+                    "dedup_key %s is absent/empty on normalized records for %s — "
+                    "config.yaml data_model.dedup_key does not match normalize() "
+                    "output. Falling back to _id (then a record hash); fix the "
+                    "config so dedup is stable across runs.",
+                    dedup_fields,
+                    self.config.get("source_id") or self.source_dir.name,
+                )
+                self._dedup_key_warned = True
+            fallback = record.get("_id")
+            if fallback not in (None, ""):
+                return str(fallback)
+            return self._hash_record(record)
+
         return "|".join(key_parts)
+
+    @staticmethod
+    def _hash_record(record: dict) -> str:
+        """SHA-256 of the whole record — the last-resort dedup key."""
+        blob = json.dumps(record, sort_keys=True, default=str)
+        return hashlib.sha256(blob.encode("utf-8", "surrogatepass")).hexdigest()
 
     # ── Abstract methods that each source must implement ──────────────
 
@@ -359,6 +714,8 @@ class BaseScraper(ABC):
                 f"{skip_exception} exceptions"
             )
 
+        self._report_coverage_gaps(stats)
+
         # Flush any pending index writes
         self.storage.flush()
 
@@ -403,6 +760,34 @@ class BaseScraper(ABC):
         first_skips_logged = 0   # limit DEBUG logging of first few skips
 
         update_strategy = self.config.get("data_model", {}).get("update_strategy", "upsert")
+
+        # Either flavour of missing incremental support makes this refresh cost a
+        # full re-crawl. Say so up front so a teardown report can tell that apart
+        # from a slow or blocked host (#1502).
+        incr_kind = classify_fetch_updates(type(self))
+        noop_incremental = incr_kind in INCR_BROKEN
+        stats["incremental_support"] = incr_kind
+        stats["incremental_supported"] = (None if incr_kind == INCR_UNKNOWN
+                                          else incr_kind in INCR_WORKING)
+        since_str = since.date() if hasattr(since, "date") else since
+        if incr_kind == INCR_STUB:
+            logger.warning(
+                "NO INCREMENTAL PATH: %s.fetch_updates() is a stub and cannot yield "
+                "documents, so this update reports 0 records regardless of what "
+                "changed upstream since %s. The caller's fallback is a FULL re-crawl "
+                "of an already-ingested corpus — that cost is this stub, not a slow "
+                "or blocked host. See issue #1502.",
+                type(self).__name__, since_str,
+            )
+        elif incr_kind == INCR_IGNORES_SINCE:
+            logger.warning(
+                "NO INCREMENTAL PATH: %s.fetch_updates() never reads its `since` "
+                "argument, so it walks the ENTIRE corpus and ignores the %s cutoff. "
+                "This refresh costs as much as a full bootstrap and most records "
+                "will dedup away — slowness here is this scraper, not the host. "
+                "See issue #1502.",
+                type(self).__name__, since_str,
+            )
 
         try:
             for raw in self.fetch_updates(since):
@@ -461,6 +846,16 @@ class BaseScraper(ABC):
         stats["skip_normalize_none"] = skip_normalize_none
         stats["skip_exception"] = skip_exception
 
+        # Machine-readable marker so a teardown report can classify a 0-record
+        # refresh without re-reading the scraper (#1502).
+        if incr_kind == INCR_STUB and stats["records_fetched"] == 0:
+            stats["zero_reason"] = "no_incremental_path"
+            logger.warning(
+                "Update fetched 0 records because %s has no incremental path, not "
+                "because the source is unchanged or unreachable.",
+                self.config.get("source_id") or self.source_dir.name,
+            )
+
         # Log skip summary if there were any skips
         total_skips = skip_normalize_none + skip_exception
         if total_skips > 0:
@@ -468,6 +863,8 @@ class BaseScraper(ABC):
                 f"Skip summary: {skip_normalize_none} normalize-returned-None, "
                 f"{skip_exception} exceptions"
             )
+
+        self._report_coverage_gaps(stats)
 
         # Flush any pending index writes
         self.storage.flush()
@@ -486,16 +883,16 @@ class BaseScraper(ABC):
         sample_dir = self.source_dir / "sample"
         sample_dir.mkdir(parents=True, exist_ok=True)
 
-        # Save individual records
+        # Save individual records (scrub lone surrogates so the UTF-8 write can't crash)
         for i, record in enumerate(records):
             path = sample_dir / f"record_{i:04d}.json"
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(record, f, indent=2, ensure_ascii=False, default=str)
+                f.write(scrub_surrogates(json.dumps(record, indent=2, ensure_ascii=False, default=str)))
 
         # Save combined file
         combined_path = sample_dir / "all_samples.json"
         with open(combined_path, "w", encoding="utf-8") as f:
-            json.dump(records, f, indent=2, ensure_ascii=False, default=str)
+            f.write(scrub_surrogates(json.dumps(records, indent=2, ensure_ascii=False, default=str)))
 
         logger.info(f"Saved {len(records)} sample records to {sample_dir}")
 
@@ -692,6 +1089,8 @@ class BaseScraper(ABC):
                 f"Skip summary: {skip_normalize_none} normalize-returned-None, "
                 f"{skip_exception} exceptions"
             )
+
+        self._report_coverage_gaps(stats)
 
         self.status["last_bootstrap"] = stats["finished_at"]
         self.status["last_run"] = stats["finished_at"]

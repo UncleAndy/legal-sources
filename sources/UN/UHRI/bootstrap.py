@@ -34,7 +34,7 @@ from typing import Generator, Optional
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from common.base_scraper import BaseScraper
+from common.base_scraper import BaseScraper, as_date_str
 from common.http_client import HttpClient
 
 logging.basicConfig(
@@ -211,9 +211,11 @@ class UHRIScraper(BaseScraper):
                 except json.JSONDecodeError:
                     break
 
+                # Yield the RAW record — the framework calls normalize() once.
+                # Use normalize() here only as a validity gate (drops empty text).
                 normalized = self.normalize(record)
                 if normalized:
-                    yield normalized
+                    yield record
                     count += 1
                     logger.info(f"  [{count}/{sample_limit}] {normalized['symbol']} — {normalized['countries']}")
 
@@ -234,9 +236,10 @@ class UHRIScraper(BaseScraper):
             logger.info(f"Parsed {total:,} records, normalizing...")
             count = 0
             for i, record in enumerate(records):
-                normalized = self.normalize(record)
-                if normalized:
-                    yield normalized
+                # Yield RAW; the framework normalizes once. normalize() here is
+                # just a validity gate (skips records with no AnnotationId/text).
+                if self.normalize(record):
+                    yield record
                     count += 1
                 if (i + 1) % 10000 == 0:
                     logger.info(f"  Progress: {i+1:,}/{total:,} processed, {count:,} yielded")
@@ -245,11 +248,16 @@ class UHRIScraper(BaseScraper):
 
     def fetch_updates(self, since: str) -> Generator[dict, None, None]:
         """Fetch records updated since a given date."""
+        # `update()` passes a datetime; this body treats `since` as a date string (#1512).
+        since = as_date_str(since)
         since_dt = datetime.fromisoformat(since)
         for record in self.fetch_all():
-            if record.get("date"):
+            # fetch_all yields RAW records; derive the date via normalize().
+            normalized = self.normalize(record)
+            date_str = normalized.get("date") if normalized else None
+            if date_str:
                 try:
-                    rec_dt = datetime.fromisoformat(record["date"])
+                    rec_dt = datetime.fromisoformat(date_str)
                     if rec_dt >= since_dt:
                         yield record
                 except (ValueError, TypeError):
@@ -278,7 +286,12 @@ def main():
         sample_dir.mkdir(exist_ok=True)
 
         count = 0
-        for record in scraper.fetch_all(sample=args.sample):
+        for raw in scraper.fetch_all(sample=args.sample):
+            # fetch_all yields RAW records (framework contract); normalize for
+            # the on-disk sample so it matches what ingestion will store.
+            record = scraper.normalize(raw)
+            if not record:
+                continue
             out_path = sample_dir / f"{record['_id'][:50]}.json"
             with open(out_path, "w", encoding="utf-8") as f:
                 json.dump(record, f, ensure_ascii=False, indent=2)
@@ -291,4 +304,9 @@ def main():
 
 
 if __name__ == "__main__":
+    # `bootstrap-fast` is the fleet runner's entry point; this CLI
+    # dispatches on the literal command name, so alias it onto the full
+    # bootstrap rather than exiting 1 (VPS CLI mismatch, issue #602).
+    if len(sys.argv) > 1 and sys.argv[1] == "bootstrap-fast":
+        sys.argv[1] = "bootstrap"
     main()

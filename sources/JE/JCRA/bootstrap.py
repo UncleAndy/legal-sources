@@ -106,6 +106,21 @@ class JCRAScraper(BaseScraper):
             )
 
             if not rows:
+                if page == 1:
+                    # Page 1 of the CaseSearch listing always carries case rows
+                    # (~544 live). A 200 response with zero rows here means the
+                    # Umbraco endpoint served an empty/challenge body — the
+                    # symptom of a datacenter-IP block (jcra.je's CDN returns
+                    # nothing to Hetzner/foreign IPs; see #1162). Fail LOUD so the
+                    # run is not silently reported as a clean "0 fetched" that
+                    # ingests only the bundled samples.
+                    raise RuntimeError(
+                        f"CaseSearch page 1 returned HTTP {resp.status_code} but "
+                        "no case rows — the Umbraco endpoint served an empty body "
+                        "(datacenter-IP block?). Aborting to avoid a false-positive "
+                        "complete with 0 real records; run from a non-datacenter "
+                        "vantage (the listing yields ~544 cases from a residential IP)."
+                    )
                 break
 
             for path, title, case_no, date_str, status in rows:
@@ -287,6 +302,11 @@ class JCRAScraper(BaseScraper):
 
 
 if __name__ == "__main__":
+    # `bootstrap-fast` is the fleet runner's entry point; this CLI
+    # dispatches on the literal command name, so alias it onto the full
+    # bootstrap rather than exiting 1 (VPS CLI mismatch, issue #602).
+    if len(sys.argv) > 1 and sys.argv[1] == "bootstrap-fast":
+        sys.argv[1] = "bootstrap"
     scraper = JCRAScraper()
 
     if len(sys.argv) < 2:

@@ -105,7 +105,12 @@ def build_pdf_url(doc: dict) -> str:
 
 
 def fetch_page(search_term: str, start: int, length: int) -> dict:
-    """Fetch a page of results from the API."""
+    """Fetch a page of results from the API.
+
+    The coredataretriever endpoint intermittently returns 5xx (see #1124: a
+    transient 500 hard-killed the fleet update via a bare raise_for_status).
+    Back off and retry on 429/5xx and connection errors before giving up.
+    """
     payload = {
         "mainSearch": search_term,
         "draw": 1,
@@ -115,9 +120,23 @@ def fetch_page(search_term: str, start: int, length: int) -> dict:
         "order": [],
         "search": {"value": ""},
     }
-    resp = SESSION.post(API_URL, json=payload, timeout=60)
-    resp.raise_for_status()
-    return resp.json()
+    max_attempts = 6
+    for attempt in range(1, max_attempts + 1):
+        try:
+            resp = SESSION.post(API_URL, json=payload, timeout=60)
+            if resp.status_code in (429, 500, 502, 503, 504):
+                raise requests.HTTPError(f"{resp.status_code} Server Error", response=resp)
+            resp.raise_for_status()
+            return resp.json()
+        except (requests.HTTPError, requests.ConnectionError, requests.Timeout) as e:
+            if attempt == max_attempts:
+                raise
+            wait = min(120, 2 ** attempt)
+            logger.warning(
+                f"API error at offset {start} (attempt {attempt}/{max_attempts}): {e}; "
+                f"retrying in {wait}s"
+            )
+            time.sleep(wait)
 
 
 def fetch_pdf_text(pdf_url: str) -> str:
@@ -324,12 +343,14 @@ def bootstrap(sample: bool = False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="GT/CC data fetcher")
-    parser.add_argument("command", choices=["test-api", "bootstrap"])
+    parser.add_argument("command", choices=["test-api", "bootstrap", "bootstrap-fast"])
     parser.add_argument("--sample", action="store_true", help="Fetch only sample data")
     parser.add_argument("--full", action="store_true", help="Fetch all data")
     args = parser.parse_args()
 
     if args.command == "test-api":
         test_api()
-    elif args.command == "bootstrap":
-        bootstrap(sample=args.sample or not args.full)
+    elif args.command in ("bootstrap", "bootstrap-fast"):
+        # bootstrap-fast is the fleet entrypoint and is always a full run.
+        sample = (args.sample or not args.full) and args.command != "bootstrap-fast"
+        bootstrap(sample=sample)
