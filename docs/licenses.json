@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-10-10T23:19:17.727742+00:00",
+  "generated_at": "2026-10-11T04:27:42.395596+00:00",
   "summary": {
-    "total_complete": 2174,
-    "commercial_ok": 1981,
+    "total_complete": 2177,
+    "commercial_ok": 1984,
     "non_commercial": 170,
     "commercial_unknown": 23,
     "unverified": 26,
@@ -14,7 +14,7 @@
       "display_name": "Open government data",
       "url": null,
       "commercial_use": true,
-      "count": 693
+      "count": 695
     },
     "pd-us": {
       "display_name": "Public domain — 17 U.S.C. 105",
@@ -26,7 +26,7 @@
       "display_name": "Public domain (government works)",
       "url": null,
       "commercial_use": true,
-      "count": 368
+      "count": 369
     },
     "custom-terms": {
       "display_name": "Custom terms of use",
@@ -3307,6 +3307,15 @@
       "commercial_use": true
     },
     {
+      "id": "CZ/RozhodnutiJustice",
+      "country": "CZ",
+      "name": "Czech Court Decisions Open Data (rozhodnutí.justice.cz)",
+      "license_id": "ogd",
+      "license_name": "Open government data",
+      "license_url": "https://rozhodnuti.justice.cz",
+      "commercial_use": true
+    },
+    {
       "id": "CZ/SupremeCourt",
       "country": "CZ",
       "name": "Czech Supreme Court (Nejvyšší soud)",
@@ -4222,6 +4231,15 @@
       "license_id": "pd-gov",
       "license_name": "Public Domain (official documents)",
       "license_url": "https://www.riigiteataja.ee/en/eli/512122024001/consolide",
+      "commercial_use": true
+    },
+    {
+      "id": "EE/EMTA-TaxGuidance",
+      "country": "EE",
+      "name": "Estonia Tax and Customs Board (EMTA) Guidance",
+      "license_id": "pd-gov",
+      "license_name": "Estonian Public Information Act",
+      "license_url": "https://www.riigiteataja.ee/en/eli/514112013001/consolide",
       "commercial_use": true
     },
     {
@@ -11080,6 +11098,15 @@
       "license_id": "ogd",
       "license_name": "https://www.amcm.gov.mo/en/research-statistics/policy-and-guidelines",
       "license_url": "https://www.amcm.gov.mo/en/research-statistics/policy-and-guidelines",
+      "commercial_use": true
+    },
+    {
+      "id": "MO/BoletimOficial",
+      "country": "MO",
+      "name": "Macau Official Gazette (Boletim Oficial)",
+      "license_id": "ogd",
+      "license_name": "https://bo.io.gov.mo/",
+      "license_url": "https://bo.io.gov.mo/",
       "commercial_use": true
     },
     {
