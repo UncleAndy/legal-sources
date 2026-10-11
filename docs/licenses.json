@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-10-11T12:17:51.100189+00:00",
+  "generated_at": "2026-10-11T18:39:57.049241+00:00",
   "summary": {
-    "total_complete": 2181,
-    "commercial_ok": 1987,
+    "total_complete": 2185,
+    "commercial_ok": 1991,
     "non_commercial": 171,
     "commercial_unknown": 23,
     "unverified": 26,
@@ -38,7 +38,7 @@
       "display_name": "CC BY 4.0",
       "url": "https://creativecommons.org/licenses/by/4.0/",
       "commercial_use": true,
-      "count": 104
+      "count": 106
     },
     "eur-lex": {
       "display_name": "EUR-Lex reuse notice",
@@ -52,16 +52,16 @@
       "commercial_use": true,
       "count": 63
     },
-    "custom-nc": {
-      "display_name": "Custom non-commercial terms",
-      "url": null,
-      "commercial_use": false,
-      "count": 42
-    },
     "pd-de": {
       "display_name": "Public domain — 5 UrhG",
       "url": "https://www.gesetze-im-internet.de/urhg/__5.html",
       "commercial_use": true,
+      "count": 44
+    },
+    "custom-nc": {
+      "display_name": "Custom non-commercial terms",
+      "url": null,
+      "commercial_use": false,
       "count": 42
     },
     "odbl-1.0": {
@@ -3541,6 +3541,15 @@
       "commercial_use": true
     },
     {
+      "id": "DE/BVerwG",
+      "country": "DE",
+      "name": "German Federal Administrative Court (BVerwG)",
+      "license_id": "pd-de",
+      "license_name": "§ 5 UrhG",
+      "license_url": "https://www.gesetze-im-internet.de/urhg/__5.html",
+      "commercial_use": true
+    },
+    {
       "id": "DE/BaFin",
       "country": "DE",
       "name": "German Financial Supervisory Authority (BaFin)",
@@ -3598,6 +3607,15 @@
       "id": "DE/BfDI",
       "country": "DE",
       "name": "German Federal Data Protection Authority (BfDI)",
+      "license_id": "pd-de",
+      "license_name": "Public domain — § 5 UrhG",
+      "license_url": "https://www.gesetze-im-internet.de/urhg/__5.html",
+      "commercial_use": true
+    },
+    {
+      "id": "DE/BfJ",
+      "country": "DE",
+      "name": "German Federal Office of Justice (BfJ)",
       "license_id": "pd-de",
       "license_name": "Public domain — § 5 UrhG",
       "license_url": "https://www.gesetze-im-internet.de/urhg/__5.html",
@@ -4405,6 +4423,15 @@
       "commercial_use": true
     },
     {
+      "id": "ES/BasqueCountry",
+      "country": "ES",
+      "name": "Basque Country Regional Legislation (BOPV/EHAA)",
+      "license_id": "cc-by-4.0",
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "commercial_use": true
+    },
+    {
       "id": "ES/CNMV",
       "country": "ES",
       "name": "Spanish Securities Commission (CNMV)",
@@ -4444,6 +4471,15 @@
       "id": "ES/CastillaLeon",
       "country": "ES",
       "name": "Castilla y León Regional Legislation (BOCYL)",
+      "license_id": "cc-by-4.0",
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "commercial_use": true
+    },
+    {
+      "id": "ES/Catalonia",
+      "country": "ES",
+      "name": "Catalan Regional Legislation (DOGC)",
       "license_id": "cc-by-4.0",
       "license_name": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0/",
