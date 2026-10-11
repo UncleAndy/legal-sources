@@ -1,10 +1,10 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-10-11T04:27:42.395596+00:00",
+  "generated_at": "2026-10-11T12:17:51.100189+00:00",
   "summary": {
-    "total_complete": 2177,
-    "commercial_ok": 1984,
-    "non_commercial": 170,
+    "total_complete": 2181,
+    "commercial_ok": 1987,
+    "non_commercial": 171,
     "commercial_unknown": 23,
     "unverified": 26,
     "unique_license_ids": 30
@@ -20,13 +20,13 @@
       "display_name": "Public domain — 17 U.S.C. 105",
       "url": "https://www.law.cornell.edu/uscode/text/17/105",
       "commercial_use": true,
-      "count": 378
+      "count": 380
     },
     "pd-gov": {
       "display_name": "Public domain (government works)",
       "url": null,
       "commercial_use": true,
-      "count": 369
+      "count": 370
     },
     "custom-terms": {
       "display_name": "Custom terms of use",
@@ -52,17 +52,17 @@
       "commercial_use": true,
       "count": 63
     },
+    "custom-nc": {
+      "display_name": "Custom non-commercial terms",
+      "url": null,
+      "commercial_use": false,
+      "count": 42
+    },
     "pd-de": {
       "display_name": "Public domain — 5 UrhG",
       "url": "https://www.gesetze-im-internet.de/urhg/__5.html",
       "commercial_use": true,
       "count": 42
-    },
-    "custom-nc": {
-      "display_name": "Custom non-commercial terms",
-      "url": null,
-      "commercial_use": false,
-      "count": 41
     },
     "odbl-1.0": {
       "display_name": "ODbL 1.0",
@@ -3485,6 +3485,15 @@
       "license_name": "§ 5 UrhG",
       "license_url": "https://www.gesetze-im-internet.de/urhg/__5.html",
       "commercial_use": true
+    },
+    {
+      "id": "DE/BNetzA",
+      "country": "DE",
+      "name": "German Network Agency (BNetzA)",
+      "license_id": "custom-nc",
+      "license_name": "BNetzA Terms of Use",
+      "license_url": "https://www.bundesnetzagentur.de/EN/General/LegalNotice/LegalNotice_node.html",
+      "commercial_use": false
     },
     {
       "id": "DE/BPatG",
@@ -12865,6 +12874,15 @@
       "commercial_use": true
     },
     {
+      "id": "PT/DiarioRepublica",
+      "country": "PT",
+      "name": "Diário da República - Portuguese Official Gazette",
+      "license_id": "pd-gov",
+      "license_name": "Public Domain (official state publications)",
+      "license_url": "https://www.law.cornell.edu/uscode/text/17/105",
+      "commercial_use": true
+    },
+    {
       "id": "PT/Parlamento",
       "country": "PT",
       "name": "Portuguese Parliament Open Data (Assembleia da República)",
@@ -16600,6 +16618,15 @@
       "commercial_use": true
     },
     {
+      "id": "US/FederalDistrictCourts",
+      "country": "US",
+      "name": "US Federal District Courts",
+      "license_id": "pd-us",
+      "license_name": "Public domain — 17 U.S.C. § 105",
+      "license_url": "https://www.law.cornell.edu/uscode/text/17/105",
+      "commercial_use": true
+    },
+    {
       "id": "US/FederalRegister",
       "country": "US",
       "name": "Federal Register",
@@ -16612,6 +16639,15 @@
       "id": "US/FederalReserve",
       "country": "US",
       "name": "US Federal Reserve Board Enforcement Actions",
+      "license_id": "pd-us",
+      "license_name": "Public domain — 17 U.S.C. § 105",
+      "license_url": "https://www.law.cornell.edu/uscode/text/17/105",
+      "commercial_use": true
+    },
+    {
+      "id": "US/FederalSpecialtyCourts",
+      "country": "US",
+      "name": "US Federal Specialty & Bankruptcy Courts",
       "license_id": "pd-us",
       "license_name": "Public domain — 17 U.S.C. § 105",
       "license_url": "https://www.law.cornell.edu/uscode/text/17/105",
