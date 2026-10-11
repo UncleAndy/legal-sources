@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-10-11T18:39:57.049241+00:00",
+  "generated_at": "2026-10-11T23:29:23.981245+00:00",
   "summary": {
-    "total_complete": 2185,
-    "commercial_ok": 1991,
+    "total_complete": 2188,
+    "commercial_ok": 1994,
     "non_commercial": 171,
     "commercial_unknown": 23,
     "unverified": 26,
@@ -14,13 +14,13 @@
       "display_name": "Open government data",
       "url": null,
       "commercial_use": true,
-      "count": 695
+      "count": 696
     },
     "pd-us": {
       "display_name": "Public domain — 17 U.S.C. 105",
       "url": "https://www.law.cornell.edu/uscode/text/17/105",
       "commercial_use": true,
-      "count": 380
+      "count": 381
     },
     "pd-gov": {
       "display_name": "Public domain (government works)",
@@ -38,7 +38,7 @@
       "display_name": "CC BY 4.0",
       "url": "https://creativecommons.org/licenses/by/4.0/",
       "commercial_use": true,
-      "count": 106
+      "count": 107
     },
     "eur-lex": {
       "display_name": "EUR-Lex reuse notice",
@@ -5449,6 +5449,15 @@
       "commercial_use": true
     },
     {
+      "id": "FI/SupremeAdministrativeCourt",
+      "country": "FI",
+      "name": "Finnish Supreme Administrative Court",
+      "license_id": "cc-by-4.0",
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "commercial_use": true
+    },
+    {
       "id": "FI/SupremeCourt",
       "country": "FI",
       "name": "Finnish Supreme Court (Korkein oikeus)",
@@ -6052,6 +6061,15 @@
       "commercial_use": true
     },
     {
+      "id": "GE/Matsne",
+      "country": "GE",
+      "name": "Georgian Legislation Database (Matsne)",
+      "license_id": "ogd",
+      "license_name": "Open Government Data",
+      "license_url": "https://matsne.gov.ge",
+      "commercial_use": true
+    },
+    {
       "id": "GE/NBG-LegalActs",
       "country": "GE",
       "name": "Georgia National Bank — Legal Acts & Regulations",
@@ -6526,6 +6544,15 @@
       "license_id": "ogd",
       "license_name": "Open Government Data",
       "license_url": "https://jurisprudencia.cc.gob.gt/",
+      "commercial_use": true
+    },
+    {
+      "id": "GU/CompilerOfLaws",
+      "country": "GU",
+      "name": "Guam Code Annotated & Administrative Rules",
+      "license_id": "pd-us",
+      "license_name": "US Public Domain",
+      "license_url": "https://www.law.cornell.edu/uscode/text/17/105",
       "commercial_use": true
     },
     {
