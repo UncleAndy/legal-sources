@@ -1,10 +1,10 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-10-12T14:38:20.894666+00:00",
+  "generated_at": "2026-10-12T22:46:11.226325+00:00",
   "summary": {
-    "total_complete": 2180,
-    "commercial_ok": 1985,
-    "non_commercial": 172,
+    "total_complete": 2184,
+    "commercial_ok": 1988,
+    "non_commercial": 173,
     "commercial_unknown": 23,
     "unverified": 26,
     "unique_license_ids": 30
@@ -14,7 +14,7 @@
       "display_name": "Open government data",
       "url": null,
       "commercial_use": true,
-      "count": 692
+      "count": 694
     },
     "pd-us": {
       "display_name": "Public domain — 17 U.S.C. 105",
@@ -38,7 +38,7 @@
       "display_name": "CC BY 4.0",
       "url": "https://creativecommons.org/licenses/by/4.0/",
       "commercial_use": true,
-      "count": 104
+      "count": 105
     },
     "eur-lex": {
       "display_name": "EUR-Lex reuse notice",
@@ -52,17 +52,17 @@
       "commercial_use": true,
       "count": 63
     },
+    "custom-nc": {
+      "display_name": "Custom non-commercial terms",
+      "url": null,
+      "commercial_use": false,
+      "count": 44
+    },
     "pd-de": {
       "display_name": "Public domain — 5 UrhG",
       "url": "https://www.gesetze-im-internet.de/urhg/__5.html",
       "commercial_use": true,
       "count": 44
-    },
-    "custom-nc": {
-      "display_name": "Custom non-commercial terms",
-      "url": null,
-      "commercial_use": false,
-      "count": 43
     },
     "odbl-1.0": {
       "display_name": "ODbL 1.0",
@@ -405,6 +405,15 @@
       "name": "Albania General Directorate of Taxation Guidance (Drejtoria e Përgjithshme e Tatimeve)",
       "license_id": "ogd",
       "license_name": "Official Albanian government data — tax legislation and guidance published by the General Directorate of Taxation. Laws and normative acts are public under Albanian law (Ligji nr. 119/2014 \"Per te Drejten e Informimit\").",
+      "license_url": null,
+      "commercial_use": true
+    },
+    {
+      "id": "AL/QBZ",
+      "country": "AL",
+      "name": "Qendra e Botimeve Zyrtare - Albanian Official Gazette",
+      "license_id": "ogd",
+      "license_name": "Open government data — no authentication required, freely accessible.",
       "license_url": null,
       "commercial_use": true
     },
@@ -763,6 +772,15 @@
       "id": "AU/QLD-Legislation",
       "country": "AU",
       "name": "Queensland Legislation (legislation.qld.gov.au)",
+      "license_id": "cc-by-4.0",
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "commercial_use": true
+    },
+    {
+      "id": "AU/QLDLegislationAPI",
+      "country": "AU",
+      "name": "Queensland Legislation API (Official REST API)",
       "license_id": "cc-by-4.0",
       "license_name": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0/",
@@ -9721,6 +9739,15 @@
       "license_id": "ogd",
       "license_name": "Open government data",
       "license_url": "https://www.e-gov.go.jp",
+      "commercial_use": true
+    },
+    {
+      "id": "JP/PPC",
+      "country": "JP",
+      "name": "Personal Information Protection Commission (PPC) Japan",
+      "license_id": "ogd",
+      "license_name": "政府標準利用規約 (Government of Japan Standard Terms of Use)",
+      "license_url": "https://www.ppc.go.jp/notice/",
       "commercial_use": true
     },
     {
@@ -19631,6 +19658,15 @@
       "license_name": "Public domain (national legislation)",
       "license_url": "https://www.wipo.int/wipolex/en/disclaimer",
       "commercial_use": true
+    },
+    {
+      "id": "ZA/Acts",
+      "country": "ZA",
+      "name": "South African Acts (gov.za)",
+      "license_id": "custom-nc",
+      "license_name": "GCIS Terms and Conditions of Use (non-commercial)",
+      "license_url": "https://www.gov.za/terms-and-conditions-use-0",
+      "commercial_use": false
     },
     {
       "id": "ZA/CompTribunal",
