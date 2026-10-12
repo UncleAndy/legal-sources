@@ -1,10 +1,10 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-10-12T04:43:11.250820+00:00",
+  "generated_at": "2026-10-12T14:38:20.894666+00:00",
   "summary": {
-    "total_complete": 2189,
-    "commercial_ok": 1995,
-    "non_commercial": 171,
+    "total_complete": 2180,
+    "commercial_ok": 1985,
+    "non_commercial": 172,
     "commercial_unknown": 23,
     "unverified": 26,
     "unique_license_ids": 30
@@ -14,7 +14,7 @@
       "display_name": "Open government data",
       "url": null,
       "commercial_use": true,
-      "count": 697
+      "count": 692
     },
     "pd-us": {
       "display_name": "Public domain — 17 U.S.C. 105",
@@ -26,7 +26,7 @@
       "display_name": "Public domain (government works)",
       "url": null,
       "commercial_use": true,
-      "count": 371
+      "count": 370
     },
     "custom-terms": {
       "display_name": "Custom terms of use",
@@ -38,13 +38,13 @@
       "display_name": "CC BY 4.0",
       "url": "https://creativecommons.org/licenses/by/4.0/",
       "commercial_use": true,
-      "count": 107
+      "count": 104
     },
     "eur-lex": {
       "display_name": "EUR-Lex reuse notice",
       "url": "https://eur-lex.europa.eu/content/legal-notice/legal-notice.html",
       "commercial_use": true,
-      "count": 64
+      "count": 63
     },
     "ogl-3.0": {
       "display_name": "OGL v3.0",
@@ -56,13 +56,13 @@
       "display_name": "Public domain — 5 UrhG",
       "url": "https://www.gesetze-im-internet.de/urhg/__5.html",
       "commercial_use": true,
-      "count": 43
+      "count": 44
     },
     "custom-nc": {
       "display_name": "Custom non-commercial terms",
       "url": null,
       "commercial_use": false,
-      "count": 42
+      "count": 43
     },
     "odbl-1.0": {
       "display_name": "ODbL 1.0",
@@ -74,7 +74,7 @@
       "display_name": "Licence Ouverte 2.0",
       "url": "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
       "commercial_use": true,
-      "count": 38
+      "count": 37
     },
     "cc0-1.0": {
       "display_name": "CC0 1.0",
@@ -328,6 +328,15 @@
       "commercial_use": true
     },
     {
+      "id": "AG/Gazette",
+      "country": "AG",
+      "name": "Antigua and Barbuda Official Gazette",
+      "license_id": "pd-gov",
+      "license_name": "Public domain (government)",
+      "license_url": null,
+      "commercial_use": true
+    },
+    {
       "id": "AG/Legislation",
       "country": "AG",
       "name": "Antigua & Barbuda Laws (OECS)",
@@ -396,15 +405,6 @@
       "name": "Albania General Directorate of Taxation Guidance (Drejtoria e Përgjithshme e Tatimeve)",
       "license_id": "ogd",
       "license_name": "Official Albanian government data — tax legislation and guidance published by the General Directorate of Taxation. Laws and normative acts are public under Albanian law (Ligji nr. 119/2014 \"Per te Drejten e Informimit\").",
-      "license_url": null,
-      "commercial_use": true
-    },
-    {
-      "id": "AL/QBZ",
-      "country": "AL",
-      "name": "Qendra e Botimeve Zyrtare - Albanian Official Gazette",
-      "license_id": "ogd",
-      "license_name": "Open government data — no authentication required, freely accessible.",
       "license_url": null,
       "commercial_use": true
     },
@@ -763,15 +763,6 @@
       "id": "AU/QLD-Legislation",
       "country": "AU",
       "name": "Queensland Legislation (legislation.qld.gov.au)",
-      "license_id": "cc-by-4.0",
-      "license_name": "CC BY 4.0",
-      "license_url": "https://creativecommons.org/licenses/by/4.0/",
-      "commercial_use": true
-    },
-    {
-      "id": "AU/QLDLegislationAPI",
-      "country": "AU",
-      "name": "Queensland Legislation API (Official REST API)",
       "license_id": "cc-by-4.0",
       "license_name": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0/",
@@ -3712,6 +3703,15 @@
       "commercial_use": true
     },
     {
+      "id": "DE/LBA",
+      "country": "DE",
+      "name": "German Aviation Authority (LBA)",
+      "license_id": "pd-de",
+      "license_name": "§ 5 UrhG",
+      "license_url": "https://www.gesetze-im-internet.de/urhg/__5.html",
+      "commercial_use": true
+    },
+    {
       "id": "DE/LDI-NRW",
       "country": "DE",
       "name": "LDI NRW - North Rhine-Westphalia Data Protection Authority",
@@ -4864,15 +4864,6 @@
       "commercial_use": true
     },
     {
-      "id": "EU/DGComp",
-      "country": "EU",
-      "name": "EU Competition Directorate-General (DG COMP)",
-      "license_id": "eur-lex",
-      "license_name": "EUR-Lex reuse notice",
-      "license_url": "https://eur-lex.europa.eu/content/legal-notice/legal-notice.html",
-      "commercial_use": true
-    },
-    {
       "id": "EU/EASA",
       "country": "EU",
       "name": "EU Aviation Safety Agency (EASA)",
@@ -5731,15 +5722,6 @@
       "id": "FR/CNDA",
       "country": "FR",
       "name": "French National Asylum Court (CNDA)",
-      "license_id": "licence-ouverte-2.0",
-      "license_name": "Licence Ouverte 2.0 / Open Licence (Etalab)",
-      "license_url": "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
-      "commercial_use": true
-    },
-    {
-      "id": "FR/CNIL",
-      "country": "FR",
-      "name": "CNIL - Commission Nationale de l'Informatique et des Libertés",
       "license_id": "licence-ouverte-2.0",
       "license_name": "Licence Ouverte 2.0 / Open Licence (Etalab)",
       "license_url": "https://www.etalab.gouv.fr/licence-ouverte-open-licence/",
@@ -7123,6 +7105,15 @@
       "commercial_use": true
     },
     {
+      "id": "IE/RevisedActs",
+      "country": "IE",
+      "name": "Irish Revised Acts (Law Reform Commission)",
+      "license_id": "custom-nc",
+      "license_name": "Law Reform Commission website terms (no open licence stated)",
+      "license_url": "https://revisedacts.lawreform.ie/revacts/intro",
+      "commercial_use": false
+    },
+    {
       "id": "IE/SupremeCourt",
       "country": "IE",
       "name": "Irish Courts Service - Case Law",
@@ -7312,15 +7303,6 @@
       "commercial_use": true
     },
     {
-      "id": "IN/HighCourtAWS",
-      "country": "IN",
-      "name": "Indian High Court Judgments (AWS Open Data)",
-      "license_id": "cc-by-4.0",
-      "license_name": "CC BY 4.0",
-      "license_url": "https://creativecommons.org/licenses/by/4.0/",
-      "commercial_use": true
-    },
-    {
       "id": "IN/IBBI",
       "country": "IN",
       "name": "Insolvency and Bankruptcy Board of India",
@@ -7459,15 +7441,6 @@
       "id": "IN/TRAI",
       "country": "IN",
       "name": "India Telecom Regulatory Authority (TRAI) Orders",
-      "license_id": "ogd",
-      "license_name": "Government Open Data License — India",
-      "license_url": "https://data.gov.in/government-open-data-license-india",
-      "commercial_use": true
-    },
-    {
-      "id": "IN/eGazette",
-      "country": "IN",
-      "name": "Gazette of India (egazette.gov.in)",
       "license_id": "ogd",
       "license_name": "Government Open Data License — India",
       "license_url": "https://data.gov.in/government-open-data-license-india",
@@ -10066,15 +10039,6 @@
       "commercial_use": true
     },
     {
-      "id": "KR/KINS",
-      "country": "KR",
-      "name": "Korea Institute of Nuclear Safety",
-      "license_id": "ogd",
-      "license_name": "Public Data Act / Copyright Act art. 24-2 (public works free use)",
-      "license_url": "https://www.kins.re.kr/copyright",
-      "commercial_use": true
-    },
-    {
       "id": "KR/KLRI",
       "country": "KR",
       "name": "Korea Legislation Research Institute Open API",
@@ -10388,15 +10352,6 @@
       "license_name": "",
       "license_url": null,
       "commercial_use": null
-    },
-    {
-      "id": "LK/GovPrinter",
-      "country": "LK",
-      "name": "Sri Lanka Department of Government Printing — Acts & Gazettes",
-      "license_id": "pd-gov",
-      "license_name": "Sri Lanka Government Publications — public domain",
-      "license_url": null,
-      "commercial_use": true
     },
     {
       "id": "LK/LawNet",
@@ -12532,15 +12487,6 @@
       "commercial_use": true
     },
     {
-      "id": "PE/OSCE",
-      "country": "PE",
-      "name": "Peru OSCE - Public Procurement Tribunal Resolutions",
-      "license_id": "ogd",
-      "license_name": "Official Peruvian government data — tribunal resolutions published on gob.pe. Peruvian administrative decisions are public acts. Peru's open government data policy applies.",
-      "license_url": null,
-      "commercial_use": true
-    },
-    {
       "id": "PE/SUNAT-Informes",
       "country": "PE",
       "name": "Peru SUNAT Tax Authority Guidance (Informes)",
@@ -12691,15 +12637,6 @@
       "license_id": "cc-by-4.0",
       "license_name": "CC BY 4.0",
       "license_url": "https://creativecommons.org/licenses/by/4.0/",
-      "commercial_use": true
-    },
-    {
-      "id": "PL/DziennikUrzedowy",
-      "country": "PL",
-      "name": "Dziennik Ustaw - Polish Official Journal",
-      "license_id": "ogd",
-      "license_name": "Open Government Data",
-      "license_url": "https://dane.gov.pl",
       "commercial_use": true
     },
     {
@@ -14647,15 +14584,6 @@
       "commercial_use": true
     },
     {
-      "id": "TT/e-Gazette",
-      "country": "TT",
-      "name": "Trinidad & Tobago Official Gazette (Government Printery)",
-      "license_id": "ogd",
-      "license_name": "Open Government Data",
-      "license_url": null,
-      "commercial_use": true
-    },
-    {
       "id": "TV/PacLII",
       "country": "TV",
       "name": "Tuvalu (PacLII)",
@@ -14833,15 +14761,6 @@
       "license_id": "ogd",
       "license_name": "Open Government Data",
       "license_url": null,
-      "commercial_use": true
-    },
-    {
-      "id": "UA/RadaLegislation",
-      "country": "UA",
-      "name": "Legislation of Ukraine (Verkhovna Rada)",
-      "license_id": "cc-by-4.0",
-      "license_name": "**CC BY 4.0** (Creative Commons Attribution 4.0)",
-      "license_url": "https://creativecommons.org/licenses/by/4.0/",
       "commercial_use": true
     },
     {
@@ -16246,15 +16165,6 @@
       "license_id": "pd-gov",
       "license_name": "Tribal government edict — public record",
       "license_url": "https://attorneygeneral.cherokee.org/opinions/",
-      "commercial_use": true
-    },
-    {
-      "id": "US/CherokeeNationCode",
-      "country": "US",
-      "name": "Cherokee Nation Code Annotated",
-      "license_id": "pd-gov",
-      "license_name": "Tribal government edict — public record",
-      "license_url": "https://attorneygeneral.cherokee.org/tribal-code/",
       "commercial_use": true
     },
     {
@@ -19324,6 +19234,15 @@
       "license_id": "pd-gov",
       "license_name": "Public domain",
       "license_url": "https://www.konstsud.uz",
+      "commercial_use": true
+    },
+    {
+      "id": "UZ/LexUz",
+      "country": "UZ",
+      "name": "Lex.uz Uzbekistan National Legislation",
+      "license_id": "ogd",
+      "license_name": "lex.uz/agreement",
+      "license_url": "https://lex.uz/agreement",
       "commercial_use": true
     },
     {
