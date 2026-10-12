@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-10-11T23:29:23.981245+00:00",
+  "generated_at": "2026-10-12T04:43:11.250820+00:00",
   "summary": {
-    "total_complete": 2188,
-    "commercial_ok": 1994,
+    "total_complete": 2189,
+    "commercial_ok": 1995,
     "non_commercial": 171,
     "commercial_unknown": 23,
     "unverified": 26,
@@ -14,7 +14,7 @@
       "display_name": "Open government data",
       "url": null,
       "commercial_use": true,
-      "count": 696
+      "count": 697
     },
     "pd-us": {
       "display_name": "Public domain — 17 U.S.C. 105",
@@ -26,7 +26,7 @@
       "display_name": "Public domain (government works)",
       "url": null,
       "commercial_use": true,
-      "count": 370
+      "count": 371
     },
     "custom-terms": {
       "display_name": "Custom terms of use",
@@ -56,7 +56,7 @@
       "display_name": "Public domain — 5 UrhG",
       "url": "https://www.gesetze-im-internet.de/urhg/__5.html",
       "commercial_use": true,
-      "count": 44
+      "count": 43
     },
     "custom-nc": {
       "display_name": "Custom non-commercial terms",
@@ -325,15 +325,6 @@
       "license_id": "pd-gov",
       "license_name": "Public domain (national legislation)",
       "license_url": "https://www.wipo.int/wipolex/en/disclaimer",
-      "commercial_use": true
-    },
-    {
-      "id": "AG/Gazette",
-      "country": "AG",
-      "name": "Antigua and Barbuda Official Gazette",
-      "license_id": "pd-gov",
-      "license_name": "Public domain (government)",
-      "license_url": null,
       "commercial_use": true
     },
     {
@@ -3715,15 +3706,6 @@
       "id": "DE/KEK",
       "country": "DE",
       "name": "German Media Concentration Commission (KEK)",
-      "license_id": "pd-de",
-      "license_name": "§ 5 UrhG",
-      "license_url": "https://www.gesetze-im-internet.de/urhg/__5.html",
-      "commercial_use": true
-    },
-    {
-      "id": "DE/LBA",
-      "country": "DE",
-      "name": "German Aviation Authority (LBA)",
       "license_id": "pd-de",
       "license_name": "§ 5 UrhG",
       "license_url": "https://www.gesetze-im-internet.de/urhg/__5.html",
@@ -7555,6 +7537,15 @@
       "commercial_use": true
     },
     {
+      "id": "INTL/AU-Decisions",
+      "country": "INTL",
+      "name": "African Union Assembly Decisions & Resolutions (DSpace Archive)",
+      "license_id": "ogd",
+      "license_name": "African Union open access",
+      "license_url": null,
+      "commercial_use": true
+    },
+    {
       "id": "INTL/AU-PAP",
       "country": "INTL",
       "name": "African Union Pan-African Parliament — Resolutions and Model Laws",
@@ -10696,6 +10687,15 @@
       "commercial_use": true
     },
     {
+      "id": "LY/LawSocietyGazette",
+      "country": "LY",
+      "name": "Libya Law Society — Official Gazette & Legislation Archive",
+      "license_id": "ogd",
+      "license_name": "Open Government Data",
+      "license_url": null,
+      "commercial_use": true
+    },
+    {
       "id": "LY/LibyanLawSociety",
       "country": "LY",
       "name": "Libyan Law and Society — Leiden/Benghazi Academic Collection",
@@ -12109,6 +12109,15 @@
       "commercial_use": true
     },
     {
+      "id": "NL/TweedeKamer",
+      "country": "NL",
+      "name": "Dutch House of Representatives (Tweede Kamer)",
+      "license_id": "pd-gov",
+      "license_name": "Public Domain",
+      "license_url": "https://data.overheid.nl/licenties",
+      "commercial_use": true
+    },
+    {
       "id": "NL/wetten.overheid.nl",
       "country": "NL",
       "name": "Dutch Legislation Portal (wetten.overheid.nl)",
@@ -12735,6 +12744,15 @@
       "name": "Polish Supreme Administrative Court - Tax",
       "license_id": "ogd",
       "license_name": "Open government data",
+      "license_url": "https://dane.gov.pl",
+      "commercial_use": true
+    },
+    {
+      "id": "PL/SAOS",
+      "country": "PL",
+      "name": "SAOS - System Analizy Orzeczeń Sądowych",
+      "license_id": "pd-gov",
+      "license_name": "Public Domain (Polish court decisions)",
       "license_url": "https://dane.gov.pl",
       "commercial_use": true
     },
@@ -19306,15 +19324,6 @@
       "license_id": "pd-gov",
       "license_name": "Public domain",
       "license_url": "https://www.konstsud.uz",
-      "commercial_use": true
-    },
-    {
-      "id": "UZ/LexUz",
-      "country": "UZ",
-      "name": "Lex.uz Uzbekistan National Legislation",
-      "license_id": "ogd",
-      "license_name": "lex.uz/agreement",
-      "license_url": "https://lex.uz/agreement",
       "commercial_use": true
     },
     {
