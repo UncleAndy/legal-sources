@@ -1,11 +1,11 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-10-14T00:56:05.171671+00:00",
+  "generated_at": "2026-10-14T07:12:02.400146+00:00",
   "summary": {
-    "total_complete": 2193,
-    "commercial_ok": 1997,
+    "total_complete": 2191,
+    "commercial_ok": 1996,
     "non_commercial": 173,
-    "commercial_unknown": 23,
+    "commercial_unknown": 22,
     "unverified": 26,
     "unique_license_ids": 30
   },
@@ -14,7 +14,7 @@
       "display_name": "Open government data",
       "url": null,
       "commercial_use": true,
-      "count": 699
+      "count": 698
     },
     "pd-us": {
       "display_name": "Public domain — 17 U.S.C. 105",
@@ -26,7 +26,7 @@
       "display_name": "Public domain (government works)",
       "url": null,
       "commercial_use": true,
-      "count": 370
+      "count": 371
     },
     "custom-terms": {
       "display_name": "Custom terms of use",
@@ -50,7 +50,7 @@
       "display_name": "OGL v3.0",
       "url": "https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/",
       "commercial_use": true,
-      "count": 63
+      "count": 62
     },
     "custom-nc": {
       "display_name": "Custom non-commercial terms",
@@ -98,7 +98,7 @@
       "display_name": "",
       "url": null,
       "commercial_use": null,
-      "count": 19
+      "count": 18
     },
     "cc-by-nc": {
       "display_name": "CC BY-NC 4.0",
@@ -7042,15 +7042,6 @@
       "commercial_use": true
     },
     {
-      "id": "IE/CCPC",
-      "country": "IE",
-      "name": "Irish Competition Authority (CCPC)",
-      "license_id": "ogl-3.0",
-      "license_name": "Irish Open Government Licence",
-      "license_url": "https://data.gov.ie/pages/licence",
-      "commercial_use": true
-    },
-    {
       "id": "IE/CoimisiunNaMean",
       "country": "IE",
       "name": "Coimisiún na Meán (Ireland's media regulator) — Broadcasting & Video-on-Demand Complaint Decisions",
@@ -13117,15 +13108,6 @@
       "commercial_use": true
     },
     {
-      "id": "QA/AlMeezanCaseLaw",
-      "country": "QA",
-      "name": "Qatar Al Meezan Case Law Database",
-      "license_id": "ogd",
-      "license_name": "Official Qatari case law — published by the Ministry of Justice via Al Meezan. Court decisions are public judicial acts under Qatari law. No formal open data license published.",
-      "license_url": null,
-      "commercial_use": true
-    },
-    {
       "id": "QA/FreeZonesLaws",
       "country": "QA",
       "name": "Qatar Free Zones Laws",
@@ -16273,6 +16255,15 @@
       "license_id": "pd-gov",
       "license_name": "Tribal government edict — public record",
       "license_url": "https://attorneygeneral.cherokee.org/opinions/",
+      "commercial_use": true
+    },
+    {
+      "id": "US/CherokeeNationCode",
+      "country": "US",
+      "name": "Cherokee Nation Code Annotated",
+      "license_id": "pd-gov",
+      "license_name": "Tribal government edict — public record",
+      "license_url": "https://cherokeenationcouncil.com/tribal-code/",
       "commercial_use": true
     },
     {
@@ -19505,15 +19496,6 @@
       "license_name": "Open Government Data",
       "license_url": "https://bviita.vg",
       "commercial_use": true
-    },
-    {
-      "id": "VI/Legislature",
-      "country": "VI",
-      "name": "USVI Legislature Acts & Code",
-      "license_id": "",
-      "license_name": "",
-      "license_url": null,
-      "commercial_use": null
     },
     {
       "id": "VI/SuperiorCourt",
