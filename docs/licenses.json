@@ -1,9 +1,9 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-10-17T20:14:47.237176+00:00",
+  "generated_at": "2026-10-18T03:23:53.701538+00:00",
   "summary": {
-    "total_complete": 2192,
-    "commercial_ok": 1997,
+    "total_complete": 2190,
+    "commercial_ok": 1995,
     "non_commercial": 173,
     "commercial_unknown": 22,
     "unverified": 26,
@@ -14,19 +14,19 @@
       "display_name": "Open government data",
       "url": null,
       "commercial_use": true,
-      "count": 698
+      "count": 696
     },
     "pd-us": {
       "display_name": "Public domain — 17 U.S.C. 105",
       "url": "https://www.law.cornell.edu/uscode/text/17/105",
       "commercial_use": true,
-      "count": 382
+      "count": 381
     },
     "pd-gov": {
       "display_name": "Public domain (government works)",
       "url": null,
       "commercial_use": true,
-      "count": 370
+      "count": 371
     },
     "custom-terms": {
       "display_name": "Custom terms of use",
@@ -1243,15 +1243,6 @@
       "license_id": "ogd",
       "license_name": "Open Data — Gratis hergebruik",
       "license_url": "https://codex.opendata.api.vlaanderen.be/docs/",
-      "commercial_use": true
-    },
-    {
-      "id": "BE/Wallex",
-      "country": "BE",
-      "name": "Wallex — Walloon Region Consolidated Legislation",
-      "license_id": "ogd",
-      "license_name": "Open Data (Service public de Wallonie)",
-      "license_url": "https://www.wallonie.be/fr/conditions-generales-dutilisation",
       "commercial_use": true
     },
     {
@@ -12820,15 +12811,6 @@
       "commercial_use": true
     },
     {
-      "id": "PL/URE",
-      "country": "PL",
-      "name": "Polish Energy Regulatory Office",
-      "license_id": "ogd",
-      "license_name": "Open government data",
-      "license_url": "https://dane.gov.pl",
-      "commercial_use": true
-    },
-    {
       "id": "PM/JOSPM",
       "country": "PM",
       "name": "Journal Officiel de Saint-Pierre-et-Miquelon",
@@ -18742,15 +18724,6 @@
       "commercial_use": true
     },
     {
-      "id": "US/TN-TPUC",
-      "country": "US",
-      "name": "Tennessee Public Utility Commission — Orders",
-      "license_id": "pd-us",
-      "license_name": "Public domain — U.S. government edict (state regulatory orders)",
-      "license_url": "https://www.law.cornell.edu/uscode/text/17/105",
-      "commercial_use": true
-    },
-    {
       "id": "US/TN-TaxRulings",
       "country": "US",
       "name": "Tennessee Department of Revenue — Letter Rulings",
@@ -19717,6 +19690,15 @@
       "id": "YE/MOJ",
       "country": "YE",
       "name": "Yemen Ministry of Justice Legislation Database",
+      "license_id": "pd-gov",
+      "license_name": "Public domain (government)",
+      "license_url": null,
+      "commercial_use": true
+    },
+    {
+      "id": "YE/Parliament",
+      "country": "YE",
+      "name": "Yemen House of Representatives Legislative Encyclopedia",
       "license_id": "pd-gov",
       "license_name": "Public domain (government)",
       "license_url": null,
